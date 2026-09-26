@@ -1,0 +1,15 @@
+{
+  "name": "kick-video-downloader",
+  "version": "1.0.0",
+  "description": "Приложение для скачивания видео с Kick.com в выбранном качестве с контролем места на диске",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": ["kick", "video", "downloader", "hls", "vod"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^44.4.4"
+  }
+}

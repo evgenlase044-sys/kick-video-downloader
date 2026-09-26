@@ -1,0 +1,734 @@
+{
+  "_doc": "Шаблон в стиле iShowSplash-мем-эдитов (WrestleMania 1080x1440@60). Собран по покадровому разбору эталонного видео. Clips используют исходник как материал; для своего видео замените src и подгоните in/dur.",
+  "canvas": {
+    "width": 1080,
+    "height": 1440,
+    "fps": 60
+  },
+  "output": {
+    "crf": 18,
+    "preset": "medium",
+    "audio_bitrate": "192k"
+  },
+  "grade": {
+    "contrast": 1.02,
+    "saturation": 1.05,
+    "sharpen": 0.3,
+    "vignette": 0.12,
+    "ca_px": 1.4,
+    "tint": "none"
+  },
+  "fonts": {
+    "marker": "../../fonts/Bangers-Regular.ttf",
+    "sans": "../../fonts/montserrat-montserrat-extrabold.ttf"
+  },
+  "watermark": {
+    "text": "",
+    "size": 34,
+    "y": 0.845,
+    "color": "#FFFFFF",
+    "opacity": 0.92,
+    "outline": 3,
+    "shadow": true
+  },
+  "clips": [
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 0.0,
+      "dur": 2.3,
+      "zoom_from": 1.02,
+      "zoom_to": 1.18,
+      "anchor": [
+        0.5,
+        0.42
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 2.3,
+      "dur": 2.68,
+      "zoom_from": 1.0,
+      "zoom_to": 1.16,
+      "anchor": [
+        0.45,
+        0.4
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 4.98,
+      "dur": 0.95,
+      "zoom_from": 1.22,
+      "zoom_to": 1.05,
+      "anchor": [
+        0.5,
+        0.45
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 5.93,
+      "dur": 2.34,
+      "zoom_from": 1.0,
+      "zoom_to": 1.2,
+      "anchor": [
+        0.55,
+        0.45
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 8.27,
+      "dur": 1.0,
+      "zoom_from": 1.28,
+      "zoom_to": 1.42,
+      "anchor": [
+        0.5,
+        0.35
+      ],
+      "ca_mult": 1.6
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 9.27,
+      "dur": 1.46,
+      "zoom_from": 1.0,
+      "zoom_to": 1.12,
+      "anchor": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 10.73,
+      "dur": 1.52,
+      "zoom_from": 1.08,
+      "zoom_to": 1.28,
+      "anchor": [
+        0.5,
+        0.4
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 12.25,
+      "dur": 1.08,
+      "zoom_from": 1.0,
+      "zoom_to": 1.18,
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "burst": 6
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 13.33,
+      "dur": 1.45,
+      "zoom_from": 1.05,
+      "zoom_to": 1.15,
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "ca_mult": 1.8
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 14.78,
+      "dur": 3.04,
+      "zoom_from": 1.0,
+      "zoom_to": 1.22,
+      "anchor": [
+        0.45,
+        0.55
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 17.82,
+      "dur": 1.26,
+      "zoom_from": 1.3,
+      "zoom_to": 1.45,
+      "anchor": [
+        0.5,
+        0.45
+      ],
+      "burst": 5,
+      "ca_mult": 2.0
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 19.08,
+      "dur": 4.59,
+      "zoom_from": 1.0,
+      "zoom_to": 1.15,
+      "anchor": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 23.67,
+      "dur": 2.2,
+      "zoom_from": 1.1,
+      "zoom_to": 1.3,
+      "anchor": [
+        0.5,
+        0.55
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 25.87,
+      "dur": 2.06,
+      "zoom_from": 1.0,
+      "zoom_to": 1.25,
+      "anchor": [
+        0.5,
+        0.45
+      ],
+      "ca_mult": 1.8
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 27.93,
+      "dur": 3.0,
+      "zoom_from": 1.0,
+      "zoom_to": 1.18,
+      "anchor": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 30.93,
+      "dur": 2.77,
+      "zoom_from": 1.05,
+      "zoom_to": 1.2,
+      "anchor": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 33.7,
+      "dur": 2.57,
+      "zoom_from": 1.0,
+      "zoom_to": 1.12,
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "tint": "red_dark"
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 36.27,
+      "dur": 1.4,
+      "zoom_from": 1.15,
+      "zoom_to": 1.3,
+      "anchor": [
+        0.5,
+        0.4
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 37.67,
+      "dur": 2.3,
+      "zoom_from": 1.0,
+      "zoom_to": 1.2,
+      "anchor": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 39.97,
+      "dur": 1.78,
+      "zoom_from": 1.1,
+      "zoom_to": 1.25,
+      "anchor": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+      "in": 41.75,
+      "dur": 2.3,
+      "zoom_from": 1.0,
+      "zoom_to": 1.08,
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "blur_darken": 0.5
+    }
+  ],
+  "nametags": [
+    {
+      "text": "ISHOWSPEED",
+      "color": "#E8261F",
+      "x": 0.13,
+      "y": 0.048,
+      "start": 0.0,
+      "end": 2.25,
+      "arrow": true,
+      "size": 30
+    },
+    {
+      "text": "LOGAN PAUL",
+      "color": "#28E0D8",
+      "x": 0.33,
+      "y": 0.048,
+      "start": 0.0,
+      "end": 2.25,
+      "arrow": true,
+      "size": 30
+    }
+  ],
+  "texts": [
+    {
+      "id": "you",
+      "style": "marker",
+      "text": "YOU",
+      "colors": [
+        "#FFFFFF"
+      ],
+      "start": 0.95,
+      "end": 2.25,
+      "x": 0.38,
+      "y": 0.52,
+      "size": 64,
+      "rotate_jitter_deg": 3.0,
+      "stroke": 7,
+      "shadow": {
+        "dx": 5,
+        "dy": 7,
+        "blur": 4,
+        "opacity": 0.85
+      },
+      "wobble": {
+        "amp": 4.0,
+        "freq": 7.0
+      }
+    },
+    {
+      "id": "what_you",
+      "style": "marker",
+      "text": "WHAT? YOU",
+      "colors": [
+        "#F7D117",
+        "#FFFFFF"
+      ],
+      "start": 2.6,
+      "end": 4.4,
+      "x": 0.5,
+      "y": 0.507,
+      "size": 80,
+      "word_starts": [
+        0.0,
+        1.3
+      ],
+      "rotate_jitter_deg": 3.0,
+      "stroke": 7,
+      "shadow": {
+        "dx": 5,
+        "dy": 7,
+        "blur": 4,
+        "opacity": 0.85
+      },
+      "wobble": {
+        "amp": 4.0,
+        "freq": 7.0
+      },
+      "tracking": 0.04
+    },
+    {
+      "id": "mania",
+      "style": "marker",
+      "text": "YOU COST ME MY MANIA!",
+      "colors": [
+        "#FFFFFF",
+        "#E8261F",
+        "#E8261F",
+        "#FFFFFF",
+        "#F7D117"
+      ],
+      "start": 4.55,
+      "end": 5.85,
+      "x": 0.5,
+      "y": 0.507,
+      "size": 80,
+      "word_starts": [
+        0.0,
+        0.12,
+        0.24,
+        0.36
+      ],
+      "rotate_jitter_deg": 3.0,
+      "stroke": 7,
+      "shadow": {
+        "dx": 5,
+        "dy": 7,
+        "blur": 4,
+        "opacity": 0.85
+      },
+      "wobble": {
+        "amp": 4.0,
+        "freq": 7.0
+      },
+      "tracking": 0.04
+    },
+    {
+      "id": "crying",
+      "style": "italic",
+      "text": "*CRYING IN PAIN*",
+      "colors": [
+        "#E8261F"
+      ],
+      "start": 6.6,
+      "end": 7.85,
+      "x": 0.5,
+      "y": 0.56,
+      "size": 66,
+      "tracking": 0.06,
+      "type_reveal": 0.35,
+      "stroke": 5,
+      "shadow": {
+        "dx": 3,
+        "dy": 5,
+        "blur": 3,
+        "opacity": 0.8
+      }
+    },
+    {
+      "id": "ruined",
+      "style": "marker",
+      "text": "AND YOU RUINED IT!",
+      "colors": [
+        "#FFFFFF",
+        "#E8261F",
+        "#E8261F",
+        "#E8261F"
+      ],
+      "start": 8.7,
+      "end": 10.6,
+      "x": 0.5,
+      "y": 0.52,
+      "size": 80,
+      "word_starts": [
+        0.0,
+        0.7
+      ],
+      "rotate_jitter_deg": 3.0,
+      "stroke": 7,
+      "shadow": {
+        "dx": 5,
+        "dy": 7,
+        "blur": 4,
+        "opacity": 0.85
+      },
+      "wobble": {
+        "amp": 4.0,
+        "freq": 7.0
+      },
+      "tracking": 0.04
+    },
+    {
+      "id": "throws",
+      "style": "italic",
+      "text": "*THROWS HIM OUT*",
+      "colors": [
+        "#F7D117"
+      ],
+      "start": 10.9,
+      "end": 13.1,
+      "x": 0.5,
+      "y": 0.05,
+      "size": 68,
+      "tracking": 0.06,
+      "type_reveal": 0.35,
+      "stroke": 5,
+      "shadow": {
+        "dx": 3,
+        "dy": 5,
+        "blur": 3,
+        "opacity": 0.8
+      }
+    },
+    {
+      "id": "body_splash",
+      "style": "italic",
+      "text": "*PREPARES FOR BODY SPLASH*",
+      "colors": [
+        "#F7D117"
+      ],
+      "start": 14.9,
+      "end": 17.9,
+      "x": 0.5,
+      "y": 0.31,
+      "size": 66,
+      "tracking": 0.06,
+      "type_reveal": 0.25,
+      "stroke": 5,
+      "shadow": {
+        "dx": 3,
+        "dy": 5,
+        "blur": 3,
+        "opacity": 0.8
+      }
+    },
+    {
+      "id": "wait_for_it",
+      "style": "italic",
+      "text": "*WAIT FOR IT*",
+      "colors": [
+        "#F7D117"
+      ],
+      "start": 20.7,
+      "end": 23.3,
+      "x": 0.5,
+      "y": 0.87,
+      "size": 68,
+      "tracking": 0.06,
+      "type_reveal": 0.3,
+      "stroke": 5,
+      "shadow": {
+        "dx": 3,
+        "dy": -5,
+        "blur": 3,
+        "opacity": 0.8
+      }
+    },
+    {
+      "id": "tables",
+      "style": "marker",
+      "text": "*TABLES HAVE TURNED*",
+      "colors": [
+        "#E8261F"
+      ],
+      "start": 23.8,
+      "end": 25.9,
+      "x": 0.5,
+      "y": 0.48,
+      "size": 76,
+      "type_reveal": 0.3,
+      "rotate_jitter_deg": 3.0,
+      "stroke": 7,
+      "shadow": {
+        "dx": 5,
+        "dy": 7,
+        "blur": 4,
+        "opacity": 0.85
+      },
+      "wobble": {
+        "amp": 8.0,
+        "freq": 9.0
+      },
+      "tracking": 0.04
+    },
+    {
+      "id": "jump",
+      "style": "italic",
+      "text": "*PREPARES TO JUMP*",
+      "colors": [
+        "#7FF3E8"
+      ],
+      "start": 27.9,
+      "end": 30.6,
+      "x": 0.5,
+      "y": 0.505,
+      "size": 70,
+      "tracking": 0.07,
+      "type_reveal": 0.3,
+      "stroke": 5,
+      "shadow": {
+        "dx": 3,
+        "dy": 5,
+        "blur": 3,
+        "opacity": 0.8
+      }
+    },
+    {
+      "id": "hyping",
+      "style": "italic",
+      "text": "*HYPING CROWD*",
+      "colors": [
+        "#35E05A"
+      ],
+      "start": 33.5,
+      "end": 35.9,
+      "x": 0.5,
+      "y": 0.87,
+      "size": 68,
+      "tracking": 0.06,
+      "type_reveal": 0.3,
+      "stroke": 5,
+      "shadow": {
+        "dx": 3,
+        "dy": -5,
+        "blur": 3,
+        "opacity": 0.8
+      }
+    },
+    {
+      "id": "aaaa",
+      "style": "marker",
+      "text": "AAAAAAA",
+      "colors": [
+        "#FF2A20"
+      ],
+      "start": 35.9,
+      "end": 36.8,
+      "x": 0.5,
+      "y": 0.18,
+      "size": 92,
+      "rotate_jitter_deg": 2.0,
+      "stroke": 6,
+      "glow": 10,
+      "glow_color": "#FF2A20",
+      "shadow": {
+        "dx": 4,
+        "dy": 6,
+        "blur": 4,
+        "opacity": 0.8
+      },
+      "wobble": {
+        "amp": 6.0,
+        "freq": 10.0
+      },
+      "tracking": 0.06
+    },
+    {
+      "id": "sui",
+      "style": "impact",
+      "text": "SUUUUUUUI!!!",
+      "colors": [
+        "#35E05A"
+      ],
+      "start": 36.8,
+      "end": 37.9,
+      "x": 0.5,
+      "y": 0.16,
+      "size": 118,
+      "tracking": 0.04,
+      "stroke": 5,
+      "glow": 14,
+      "glow_color": "#35E05A",
+      "shadow": {
+        "dx": 3,
+        "dy": 5,
+        "blur": 3,
+        "opacity": 0.75
+      }
+    },
+    {
+      "id": "bark",
+      "style": "italic",
+      "text": "*BARK*",
+      "colors": [
+        "#F7D117"
+      ],
+      "start": 38.0,
+      "end": 38.9,
+      "x": 0.75,
+      "y": 0.115,
+      "size": 66,
+      "tracking": 0.06,
+      "stroke": 5,
+      "shadow": {
+        "dx": 3,
+        "dy": 5,
+        "blur": 3,
+        "opacity": 0.8
+      }
+    },
+    {
+      "id": "like_sub",
+      "style": "impact",
+      "text": "LIKE AND SUB!",
+      "colors": [
+        "#35E05A"
+      ],
+      "start": 38.9,
+      "end": 39.9,
+      "x": 0.5,
+      "y": 0.36,
+      "size": 78,
+      "tracking": 0.04,
+      "stroke": 5,
+      "glow": 12,
+      "glow_color": "#35E05A",
+      "shadow": {
+        "dx": 3,
+        "dy": 5,
+        "blur": 3,
+        "opacity": 0.75
+      }
+    },
+    {
+      "id": "revenge",
+      "style": "marker",
+      "text": "*CRAZIEST REVENGE*",
+      "colors": [
+        "#FF2A20"
+      ],
+      "start": 42.2,
+      "end": 43.9,
+      "x": 0.5,
+      "y": 0.615,
+      "size": 64,
+      "rotate_jitter_deg": 2.5,
+      "stroke": 6,
+      "glow": 10,
+      "glow_color": "#FF2A20",
+      "shadow": {
+        "dx": 4,
+        "dy": 6,
+        "blur": 4,
+        "opacity": 0.8
+      },
+      "wobble": {
+        "amp": 5.0,
+        "freq": 8.0
+      }
+    }
+  ],
+  "flashes": [
+    {
+      "kind": "red",
+      "start": 13.15,
+      "dur": 0.35,
+      "peak": 0.96
+    },
+    {
+      "kind": "black",
+      "start": 23.98,
+      "dur": 0.07,
+      "peak": 1.0
+    }
+  ],
+  "emojis": [
+    {
+      "char": "💀",
+      "start": 42.1,
+      "end": 43.9,
+      "x": 0.5,
+      "y": 0.47,
+      "size": 150,
+      "glow": 16
+    }
+  ],
+  "audio": {
+    "src": "C:/Users/artba/Downloads/Telegram Desktop/YTDown_com_Shorts_Bro_turned_into_iShowSplash_Media_AyMkHMp_r_U.mp4",
+    "offset": 0.0
+  }
+}

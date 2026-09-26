@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kick Video Studio — монтаж и нарезки</title>
+    <meta name="description" content="Профессиональная студия видеоредактирования с поддержкой слоев, предпросмотром, библиотекой ресурсов и встроенным загрузчиком видео Kick.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="studio-body">
+    <!-- Ambient Background Lighting -->
+    <div class="ambient-glow glow-1"></div>
+    <div class="ambient-glow glow-2"></div>
+
+    <div class="studio-layout">
+        <!-- Top Studio Navbar -->
+        <header class="studio-header">
+            <div class="header-left">
+                <div class="kick-logo-badge" title="Kick Video Studio">
+                    <span class="kick-k">C</span>
+                </div>
+                <div class="brand-info">
+                    <div class="brand-title-row">
+                        <h1>Kick Video Studio</h1>
+                        <span class="version-tag">MONTAGE</span>
+                    </div>
+                    <span class="project-name" id="projectName">Проект: Новый монтаж</span>
+                </div>
+            </div>
+
+            <!-- Global Timecode Display -->
+            <div class="header-center">
+                <div class="timecode-display" title="Текущее время / Длительность проекта">
+                    <span class="tc-current" id="headerCurrentTime">00:00:00:00</span>
+                    <span class="tc-divider">/</span>
+                    <span class="tc-total" id="headerTotalTime">00:00:00:00</span>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <!-- Disk Status Indicator -->
+                <div class="disk-pill" id="diskPill" title="Свободное место на целевом диске (без лишних надбавок)">
+                    <div class="pulse-indicator"></div>
+                    <span class="disk-label">Диск <strong id="pillDrive">C:\</strong>:</span>
+                    <span class="disk-val" id="pillFree">-- GB</span>
+                    <button class="pill-refresh-btn" id="pillRefreshBtn" title="Обновить статус памяти">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <button class="header-icon-btn" id="dockToggleBtn" title="Скрыть/показать левую панель">Панель</button>
+                <button class="header-icon-btn" id="openFolderBtn" title="Открыть папку с видео в Проводнике Windows">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span>Папка загрузок</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Workspace (Panels Dock & Preview Monitor) -->
+        <div class="studio-workspace">
+            <!-- Left Dock: Media Library / Kick Downloader / Inspector -->
+            <aside class="left-dock" id="leftDock">
+                <!-- Dock Tab Navigation -->
+                <div class="dock-tabs">
+                    <button class="dock-tab active" data-tab="library" id="tabBtnLibrary">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                            <line x1="7" y1="2" x2="7" y2="22"></line>
+                            <line x1="17" y1="2" x2="17" y2="22"></line>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                        </svg>
+                        <span>Ресурсы</span>
+                        <span class="tab-badge" id="mediaCountBadge">0</span>
+                    </button>
+
+                    <button class="dock-tab" data-tab="kick" id="tabBtnKick">
+                        <span class="kick-tab-dot"></span>
+                        <span>Kick</span>
+                    </button>
+
+                    <button class="dock-tab" data-tab="clipper" id="tabBtnClipper" title="Shorts и субтитры">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                        </svg>
+                        <span>Shorts</span>
+                    </button>
+
+                    <button class="dock-tab" data-tab="inspector" id="tabBtnInspector">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        <span>Свойства</span>
+                    </button>
+                </div>
+
+                <!-- Tab 1: MEDIA LIBRARY -->
+                <div class="dock-panel-content active" id="tabContentLibrary">
+                    <div class="library-toolbar">
+                        <div class="library-actions">
+                            <button class="btn-sm btn-accent" id="importMediaBtn" title="Импортировать локальный видеофайл">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                                <span>Импорт видео</span>
+                            </button>
+                            <input type="file" id="localFileInput" accept="video/mp4,video/x-matroska,video/quicktime,video/webm,video/mp2t" style="display:none;" />
+
+                            <button class="btn-sm btn-secondary" id="refreshLibraryBtn" title="Обновить список ресурсов">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <span class="library-hint">Перетащите карточку на таймлайн</span>
+                    </div>
+
+                    <!-- Media Items List -->
+                    <div class="media-library-grid" id="mediaLibraryList">
+                        <div class="library-empty" id="libraryEmptyState">
+                            <div class="empty-icon">—</div>
+                            <p>В библиотеке пока нет видео</p>
+                            <span>Скачайте запись с Kick во вкладке «Загрузчик Kick» или нажмите «Импорт видео»</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: KICK DOWNLOADER -->
+                <div class="dock-panel-content" id="tabContentKick">
+                    <div class="kick-panel-scroll">
+                        <!-- URL Input Form -->
+                        <div class="kick-input-box">
+                            <label class="field-label" for="videoUrlInput">Ссылка на стрим / VOD Kick.com:</label>
+                            <div class="input-wrapper">
+                                <span class="input-icon">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                    </svg>
+                                </span>
+                                <input
+                                    type="text"
+                                    id="videoUrlInput"
+                                    placeholder="https://kick.com/channel/videos/..."
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    value="https://kick.com/jesusavgn/videos/01a0c558-1fd0-7b89-bc86-e5e39b939572"
+                                />
+                                <button class="mini-action-btn" id="pasteBtn" title="Вставить">Вставить</button>
+                                <button class="mini-action-btn" id="clearBtn" title="Очистить">✕</button>
+                            </div>
+
+                            <button class="primary-btn glow-btn btn-full" id="probeBtn">
+                                <span class="btn-text">Рассчитать размер и качества</span>
+                                <span class="spinner" id="probeSpinner"></span>
+                            </button>
+                        </div>
+
+                        <!-- Video Metadata & Quality Picker -->
+                        <div class="kick-details-container hidden" id="videoDetailsSection">
+                            <div class="video-preview-mini">
+                                <div class="thumb-box">
+                                    <img id="videoThumb" src="" alt="Превью видео" />
+                                    <span class="duration-tag" id="videoDuration">00:00:00</span>
+                                </div>
+                                <div class="mini-info">
+                                    <span class="streamer-tag" id="streamerName">Канал</span>
+                                    <h4 class="video-title-text" id="videoTitle">Запись стрима</h4>
+                                </div>
+                            </div>
+
+                            <!-- Qualities Grid -->
+                            <div class="qualities-wrapper">
+                                <div class="qualities-header">
+                                    <span class="q-title">Выбор качества (точный размер):</span>
+                                    <span class="q-hint">Без буферов</span>
+                                </div>
+                                <div class="qualities-grid" id="qualitiesGrid">
+                                    <!-- Cards populated dynamically -->
+                                </div>
+                            </div>
+
+                            <!-- Disk Usage Meter -->
+                            <div class="disk-usage-section" id="diskUsageSection">
+                                <div class="disk-usage-header">
+                                    <span class="usage-title">Память диска <strong id="diskDriveLabel">C:\</strong>:</span>
+                                    <span class="usage-summary" id="diskUsageSummary">
+                                        Свободно: <strong id="freeSpaceText">--</strong> из <strong id="totalSpaceText">--</strong>
+                                    </span>
+                                </div>
+                                <div class="storage-bar">
+                                    <div class="storage-segment used" id="storageUsedSegment" style="width: 0%;"></div>
+                                    <div class="storage-segment required" id="storageRequiredSegment" style="width: 0%;"></div>
+                                    <div class="storage-segment free" id="storageFreeSegment" style="width: 0%;"></div>
+                                </div>
+                                <div class="storage-legend">
+                                    <span class="legend-item"><span class="dot used"></span> Занято: <strong id="legendUsedSize">--</strong></span>
+                                    <span class="legend-item"><span class="dot required" id="legendRequiredDot"></span> Для видео: <strong id="legendRequiredSize">--</strong></span>
+                                    <span class="legend-item"><span class="dot free"></span> Останется: <strong id="legendRemainingSize">--</strong></span>
+                                </div>
+                            </div>
+
+                            <!-- Download Range: whole VOD or fragment -->
+                            <div class="dl-range-section">
+                                <div class="seg-control" id="dlModeSeg">
+                                    <button class="seg-btn active" data-mode="full">Целиком</button>
+                                    <button class="seg-btn" data-mode="fragment">Фрагмент</button>
+                                </div>
+                                <div class="dl-fragment-row hidden" id="dlFragmentRow">
+                                    <div class="dl-time-field">
+                                        <label>Начало</label>
+                                        <input type="text" id="dlStartInput" class="mono-input" placeholder="04:20" inputmode="numeric" />
+                                    </div>
+                                    <span class="dl-range-dash">—</span>
+                                    <div class="dl-time-field">
+                                        <label>Конец</label>
+                                        <input type="text" id="dlEndInput" class="mono-input" placeholder="05:10" inputmode="numeric" />
+                                    </div>
+                                    <button class="btn-sm btn-secondary" id="dlPreviewRangeBtn" title="Посмотреть фрагмент: начало диапазона">Проверить</button>
+                                </div>
+                                <div class="dl-fragment-hint hidden" id="dlFragmentHint">Формат: минуты:секунды или секунды. Скачается только выбранный отрезок.</div>
+                            </div>
+
+                            <!-- Insufficient Space Warning Box -->
+                            <div class="alert-box danger-alert hidden" id="spaceAlertBox">
+                                <div class="alert-icon">⚠️</div>
+                                <div class="alert-content">
+                                    <h5>Недостаточно места на диске!</h5>
+                                    <p id="spaceAlertMsg">
+                                        Для видео требуется: <strong id="alertReq">--</strong>.<br>
+                                        Свободно: всего <strong id="alertFree">--</strong>.
+                                    </p>
+                                    <div class="shortage-highlight">
+                                        Освободите как минимум: <span class="shortage-badge" id="alertShortage">-- GB</span>
+                                    </div>
+                                    <button class="secondary-btn btn-sm" id="recheckSpaceBtn">
+                                        🔄 Проверить диск снова
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Start Download Action Button -->
+                            <button class="primary-btn download-btn btn-full" id="startDownloadBtn">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                <span id="downloadBtnText">Скачать целиком (<span id="btnQualityLabel">1080p60</span>)</span>
+                            </button>
+                        </div>
+
+                        <!-- Progress Box -->
+                        <div class="kick-progress-box hidden" id="progressSection">
+                            <div class="progress-top-row">
+                                <span class="status-badge" id="statusPill">Загрузка</span>
+                                <span class="progress-pct" id="percentVal">0%</span>
+                            </div>
+                            <div class="progress-bar-wrap">
+                                <div class="progress-fill-bar" id="progressFill" style="width: 0%;"></div>
+                            </div>
+                            <div class="progress-meta-row">
+                                <span id="speedVal">0 MB/s</span>
+                                <span id="segmentsVal">0 / 0</span>
+                                <span id="etaVal">--:--</span>
+                            </div>
+                            <div class="progress-bytes-row" id="bytesVal">0 MB / 0 GB</div>
+                            <div class="status-msg-box" id="statusMessage">Инициализация загрузки...</div>
+                            <div class="progress-btn-row">
+                                <button class="btn-sm btn-danger" id="cancelDownloadBtn">Отменить</button>
+                            </div>
+                        </div>
+
+                        <!-- Notification Box (Auto-Added to Library) -->
+                        <div class="auto-library-notify hidden" id="autoLibraryNotify">
+                            <div class="notify-icon">✅</div>
+                            <div class="notify-text">
+                                <strong>Видео загружено!</strong>
+                                <p>Файл автоматически добавлен в библиотеку ресурсов.</p>
+                            </div>
+                            <button class="btn-sm btn-accent" id="addToTimelineFromKickBtn">На таймлайн</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: SHORTS TEMPLATE STUDIO (источник и метки IN/OUT — на панели слоёв) -->
+                <div class="dock-panel-content" id="tabContentClipper">
+                    <div class="clipper-panel-scroll">
+                        <div class="sh-card">
+                            <header class="sh-head">
+                                <span class="sh-num">1</span>
+                                <div class="sh-title"><h4>Шаблон нарезки</h4><p>вид нарезки и его настройки</p></div>
+                            </header>
+                            <label class="sh-label">Готовые шаблоны как в примерах</label>
+                            <div class="tv-presets">
+                                <button class="tv-preset active" id="presetTvSplit" title="Сплит 50/50: вебка сверху + геймплей снизу + PIP, TV-цветокор, белые вспышки, зелёные субтитры">
+                                    <span class="tv-preset-fire">🔥</span>
+                                    <strong>TV СПЛИТ</strong>
+                                    <span>как пример 1</span>
+                                </button>
+                                <button class="tv-preset" id="presetTvFull" title="Вебка на весь экран 9:16, TV-цветокор, белые вспышки, зелёные субтитры">
+                                    <span class="tv-preset-fire">🔥</span>
+                                    <strong>TV ФУЛЛ</strong>
+                                    <span>как пример 2</span>
+                                </button>
+                            </div>
+                            <div class="template-save-row">
+                                <input type="text" id="clipperHandleInput" class="clipper-handle-input sh-input" placeholder="@ник канала (для имён файлов)" title="Ник стримера — попадёт в имена экспортированных файлов Short_<ник>_..." />
+                                <input type="text" id="templateNameInput" class="clipper-handle-input sh-input" placeholder="Название шаблона" />
+                                <button class="btn-sm btn-accent" id="saveTemplateBtn">Сохранить</button>
+                            </div>
+                            <div class="template-list" id="templateList"></div>
+                            <label class="sh-label">Формат кадра</label>
+                            <div class="sh-formats">
+                                <div class="format-card active" data-format="split_adhd" id="formatSplitAdhd">
+                                    <div class="format-card-header">
+                                        <span class="format-icon">S</span>
+                                        <strong>Сплит 50/50</strong>
+                                    </div>
+                                    <p>Вебка сверху, геймплей снизу + PIP. Как пример 1.</p>
+                                </div>
+                                <div class="format-card" data-format="talking_head_9_16" id="formatTalkingHead">
+                                    <div class="format-card-header">
+                                        <span class="format-icon">P</span>
+                                        <strong>9:16 весь экран</strong>
+                                    </div>
+                                    <p>Вебка на весь кадр. Как пример 2.</p>
+                                </div>
+                                <div class="format-card" data-format="cinematic_16_9" id="formatCinematic">
+                                    <div class="format-card-header">
+                                        <span class="format-icon">W</span>
+                                        <strong>16:9 YouTube</strong>
+                                    </div>
+                                    <p>Широкий формат для YouTube.</p>
+                                </div>
+                            </div>
+                            <label class="sh-label">TV-обработка</label>
+                            <div class="seg-control">
+                                <button class="seg-btn grade-btn active" data-grade="tv" title="AE-цветокор: контраст, сочность, резкость, свечение (рендер 1080×1920)">Цветокор TV</button>
+                                <button class="seg-btn grade-btn" data-grade="none">Без цветокора</button>
+                            </div>
+                            <p class="sh-hint">Переходы-вспышки, полосы и тряска — отдельными блоками на слоях (кнопка +Эффект).</p>
+                            <label class="sh-label">Области кадра (рамки с пропорциями под 9:16)</label>
+                            <div class="area-pick-row">
+                                <button class="btn-sm btn-secondary" id="cropBoxDrawBtn" title="Выбрать область вебки: слой станет на весь экран, рамка держит пропорции верха">Вебка: выбрать</button>
+                                <button class="btn-sm btn-secondary" id="bgBoxDrawBtn" title="Выбрать область фона/геймплея для нижней половины сплита">Фон: выбрать</button>
+                            </div>
+                            <div class="tracking-status" id="cropBoxStatus">Вебка: весь верх · Фон: весь низ</div>
+                            <div class="area-reset-row">
+                                <button class="btn-sm btn-secondary" id="cropBoxResetBtn" title="Сбросить обе области кадра">Сбросить области</button>
+                            </div>
+                            <label class="sh-label">Стиль субтитров</label>
+                            <div class="style-cards-grid">
+                                <div class="style-card active" data-style="mrbeast" id="styleMrBeast">
+                                    <span class="style-preview mrbeast-preview">3D</span>
+                                    <span class="style-name">MrBeast 3D</span>
+                                </div>
+                                <div class="style-card" data-style="hormozi" id="styleHormozi">
+                                    <span class="style-preview hormozi-preview">BOX</span>
+                                    <span class="style-name">Hormozi</span>
+                                </div>
+                                <div class="style-card" data-style="cyber_glitch" id="styleCyberGlitch">
+                                    <span class="style-preview cyber-preview">RGB</span>
+                                    <span class="style-name">Cyber Glitch</span>
+                                </div>
+                                <div class="style-card" data-style="comic_pop" id="styleComicPop">
+                                    <span class="style-preview comic-preview">POP</span>
+                                    <span class="style-name">Comic Pop</span>
+                                </div>
+                                <div class="style-card" data-style="golden_luxury" id="styleGoldenLuxury">
+                                    <span class="style-preview gold-preview">GOLD</span>
+                                    <span class="style-name">Gold Luxury</span>
+                                </div>
+                                <div class="style-card" data-style="rage_red" id="styleRageRed">
+                                    <span class="style-preview rage-preview">RAGE</span>
+                                    <span class="style-name">Rage Red</span>
+                                </div>
+                                <div class="style-card" data-style="clean_editorial" id="styleCleanEditorial">
+                                    <span class="style-preview editorial-preview">CLEAN</span>
+                                    <span class="style-name">Clean Glass</span>
+                                </div>
+                                <div class="style-card" data-style="karaoke_spotlight" id="styleKaraokeSpotlight">
+                                    <span class="style-preview spotlight-preview">SPOT</span>
+                                    <span class="style-name">Spotlight</span>
+                                </div>
+                                <div class="style-card" data-style="acid" id="styleAcidTv">
+                                    <span class="style-preview acid-preview">ACID</span>
+                                    <span class="style-name">Acid Neon</span>
+                                </div>
+                                <div class="style-card" data-style="purple_phonk" id="stylePurplePhonk">
+                                    <span class="style-preview phonk-preview">PHONK</span>
+                                    <span class="style-name">Phonk Violet</span>
+                                </div>
+                                <div class="style-card" data-style="sunset_drift" id="styleSunsetDrift">
+                                    <span class="style-preview sunset-preview">FIRE</span>
+                                    <span class="style-name">Sunset Fire</span>
+                                </div>
+                                <div class="style-card" data-style="typewriter_terminal" id="styleTerminal">
+                                    <span class="style-preview terminal-preview">&gt;_</span>
+                                    <span class="style-name">Terminal</span>
+                                </div>
+                            </div>
+                            <div class="sub-settings">
+                                <div class="sub-set-row">
+                                    <label>Шрифт</label>
+                                    <select id="subFontSelect" class="kick-select">
+                                        <option value="Russo One">Russo One</option>
+                                        <option value="Dela Gothic One">Dela Gothic One</option>
+                                        <option value="Montserrat ExtraBold">Montserrat ExtraBold</option>
+                                        <option value="Unbounded ExtraBold">Unbounded ExtraBold</option>
+                                        <option value="Oswald Bold">Oswald Bold</option>
+                                        <option value="Oswald SemiBold">Oswald SemiBold</option>
+                                        <option value="Sofia Sans Extra Condensed Black">Sofia Sans ExtraCond Black</option>
+                                        <option value="Alumni Sans Black">Alumni Sans Black</option>
+                                        <option value="Anton">Anton (лат.)</option>
+                                        <option value="Bebas Neue">Bebas Neue (лат.)</option>
+                                        <option value="Exo 2 Black">Exo 2 Black</option>
+                                        <option value="Golos Text Black">Golos Text Black</option>
+                                        <option value="Onest Black">Onest Black</option>
+                                        <option value="Rubik Black">Rubik Black</option>
+                                        <option value="Nunito Black">Nunito Black</option>
+                                        <option value="Fira Sans Extra Bold">Fira Sans Extra Bold</option>
+                                        <option value="Wix Madefor Display ExtraBold">Wix Madefor ExtraBold</option>
+                                        <option value="M PLUS Rounded 1c">M PLUS Rounded 1c</option>
+                                        <option value="Prosto One">Prosto One</option>
+                                        <option value="Rubik Mono One">Rubik Mono One</option>
+                                        <option value="Play">Play Bold</option>
+                                        <option value="Press Start 2P">Press Start 2P</option>
+                                        <option value="Yeseva One">Yeseva One</option>
+                                        <option value="Lobster">Lobster</option>
+                                        <option value="Pacifico">Pacifico</option>
+                                        <option value="Caveat Bold">Caveat</option>
+                                        <option value="Marck Script">Marck Script</option>
+                                        <option value="Amatic SC">Amatic SC</option>
+                                    </select>
+                                </div>
+                                <div class="sub-set-row">
+                                    <label>Анимация</label>
+                                    <select id="subAnimSelect" class="kick-select">
+                                        <option value="pop" selected>Pop-in</option>
+                                        <option value="wave">Волна</option>
+                                        <option value="shimmer">Переливы цвета</option>
+                                        <option value="type">Печатка</option>
+                                        <option value="rise">Подъём</option>
+                                        <option value="spin">Ротейшн</option>
+                                        <option value="tremble">Тряска</option>
+                                        <option value="none">Без анимации</option>
+                                    </select>
+                                </div>
+                                <div class="sub-set-row">
+                                    <label>Размер <span id="subSizeVal">100%</span></label>
+                                    <input type="range" id="subSizeSlider" min="70" max="140" value="100" />
+                                </div>
+                                <div class="sub-set-row">
+                                    <label>Свечение <span id="subGlowVal">55</span></label>
+                                    <input type="range" id="subGlowSlider" min="0" max="100" value="55" />
+                                </div>
+                                <label class="sh-check" style="margin:2px 0 6px" title="Длинные важные слова подсвечиваются акцентным цветом и слегка увеличиваются">
+                                    <input type="checkbox" id="hotWordsCheck" checked /> Подсветка ключевых слов
+                                </label>
+                                <label class="sh-check" style="margin:2px 0 6px" title="Включи, если исходник — уже готовый шортс с вшитыми субтитрами и цветокором: экспорт не будет добавлять второй слой субтитров и повторный цветокор">
+                                    <input type="checkbox" id="srcProcessedCheck" /> Источник уже обработан
+                                </label>
+                                <div class="sub-set-row">
+                                    <label>Рамка сверху <span id="barTopVal">0px</span></label>
+                                    <input type="range" id="barTopSlider" min="0" max="400" value="0" />
+                                </div>
+                                <div class="sub-set-row">
+                                    <label>Рамка снизу <span id="barBottomVal">0px</span></label>
+                                    <input type="range" id="barBottomSlider" min="0" max="400" value="0" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sh-card">
+                            <header class="sh-head">
+                                <span class="sh-num">2</span>
+                                <div class="sh-title"><h4>Субтитры</h4><p>генерация — в свойствах нарезки или клипа</p></div>
+                            </header>
+                            <div class="sub-set-row">
+                                <label>Слов на фрагмент (по умолч.)</label>
+                                <select id="wordsPerCueSelect" class="kick-select">
+                                    <option value="1">1 слово (караоке)</option>
+                                    <option value="3" selected>до 3 слов</option>
+                                    <option value="5">до 5 слов</option>
+                                </select>
+                            </div>
+                            <div class="sub-set-row">
+                                <label>Язык речи (по умолч.)</label>
+                                <select id="subLangSelect" class="kick-select">
+                                    <option value="ru" selected>Русский</option>
+                                    <option value="en">English</option>
+                                    <option value="">Авто</option>
+                                </select>
+                            </div>
+                            <p class="sh-hint">Точные параметры задаются в свойствах выбранной нарезки или клипа (вкладка инспектора).</p>
+                            <div class="subtitles-cues-container hidden" id="subtitlesCuesContainer">
+                                <div class="cues-header">
+                                    <span id="cuesCountLabel">Распознано: 0 сегментов</span>
+                                    <button class="btn-sm btn-secondary" id="applySubtitlesToTimelineBtn">На слой титров</button>
+                                </div>
+                                <div class="cues-list" id="cuesList"></div>
+                            </div>
+                        </div>
+
+                        <div class="sh-card">
+                            <header class="sh-head">
+                                <span class="sh-num">3</span>
+                                <div class="sh-title"><h4>Нарезки на экспорт</h4><p>каждая — отдельным файлом</p></div>
+                                <button class="btn-sm btn-accent" id="addHighlightToPackBtn">+ Нарезка</button>
+                            </header>
+                            <div class="pack-clips-list" id="packClipsList">
+                                <div class="pack-empty-hint" id="packEmptyHint">
+                                    Нажми «+ Нарезка» на таймлайне или здесь — полосу можно тянуть за края. Все нарезки уйдут в экспорт.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sh-exportbar">
+                            <div class="export-status-box hidden" id="exportStatusBox">
+                                <div class="export-status-text" id="exportStatusText">Экспорт клипов...</div>
+                                <div class="ready-clips-grid" id="readyClipsGrid"></div>
+                            </div>
+                            <button class="primary-btn glow-btn btn-full sh-export-btn" id="exportPackBtn" disabled>
+                                <span class="btn-text">Экспортировать пак</span>
+                                <span class="spinner" id="exportPackSpinner"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="dock-panel-content" id="tabContentInspector">
+                    <div class="inspector-empty" id="inspectorEmpty">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                        <p>Кликните по клипу на таймлайне, чтобы настроить его параметры</p>
+                    </div>
+
+                    <!-- Region inspector: selected export region (нарезка) -->
+                    <div class="inspector-details hidden" id="regionInspector">
+                        <div class="inspector-header">
+                            <h4>Нарезка на экспорт</h4>
+                            <span class="inspector-badge">R</span>
+                        </div>
+                        <div class="inspector-group">
+                            <label>Название:</label>
+                            <input type="text" id="regionNameInput" class="clipper-handle-input sh-input" />
+                        </div>
+                        <div class="inspector-group">
+                            <label>Отрезок:</label>
+                            <span class="mono-val" id="regionTimesLabel">--:--</span>
+                        </div>
+                        <div class="inspector-sec-header" style="margin-top:8px">
+                            <span class="inspector-sec-label">Субтитры для нарезки</span>
+                            
+                        </div>
+                        <div class="inspector-group">
+                            <label>Слов на фрагмент:</label>
+                            <select id="regionWordsPerCue" class="kick-select">
+                                <option value="1">1 слово (караоке)</option>
+                                <option value="3" selected>до 3 слов</option>
+                                <option value="5">до 5 слов</option>
+                            </select>
+                        </div>
+                        <div class="inspector-group">
+                            <label>Шрифт субтитров:</label>
+                            <select id="regionSubFont" class="kick-select">
+                                <option value="Russo One" selected>Russo One</option>
+                                    <option value="Dela Gothic One">Dela Gothic One</option>
+                                    <option value="Montserrat ExtraBold">Montserrat ExtraBold</option>
+                                    <option value="Unbounded ExtraBold">Unbounded ExtraBold</option>
+                                    <option value="Oswald Bold">Oswald Bold</option>
+                                    <option value="Oswald SemiBold">Oswald SemiBold</option>
+                                    <option value="Sofia Sans Extra Condensed Black">Sofia Sans ExtraCond Black</option>
+                                    <option value="Alumni Sans Black">Alumni Sans Black</option>
+                                    <option value="Anton">Anton (лат.)</option>
+                                    <option value="Exo 2 Black">Exo 2 Black</option>
+                                    <option value="Golos Text Black">Golos Text Black</option>
+                                    <option value="Onest Black">Onest Black</option>
+                                    <option value="Rubik Black">Rubik Black</option>
+                                    <option value="Nunito Black">Nunito Black</option>
+                                    <option value="Fira Sans Extra Bold">Fira Sans Extra Bold</option>
+                                    <option value="Wix Madefor Display ExtraBold">Wix Madefor ExtraBold</option>
+                                    <option value="M PLUS Rounded 1c">M PLUS Rounded 1c</option>
+                                    <option value="Prosto One">Prosto One</option>
+                                    <option value="Rubik Mono One">Rubik Mono One</option>
+                                    <option value="Play">Play Bold</option>
+                                    <option value="Press Start 2P">Press Start 2P</option>
+                                    <option value="Yeseva One">Yeseva One</option>
+                                    <option value="Lobster">Lobster</option>
+                                    <option value="Pacifico">Pacifico</option>
+                                    <option value="Caveat Bold">Caveat</option>
+                                    <option value="Marck Script">Marck Script</option>
+                                    <option value="Amatic SC">Amatic SC</option>
+                            </select>
+                        </div>
+                        <div class="inspector-group">
+                            <label>Размер <span id="regionSubSizeVal">100%</span>:</label>
+                            <div class="range-row">
+                                <input type="range" id="regionSubSize" min="70" max="140" value="100" />
+                            </div>
+                        </div>
+                        <div class="inspector-group">
+                            <label>Свечение <span id="regionSubGlowVal">55</span>:</label>
+                            <div class="range-row">
+                                <input type="range" id="regionSubGlow" min="0" max="100" value="55" />
+                            </div>
+                        </div>
+                        <div class="inspector-group">
+                            <label>Анимация:</label>
+                            <select id="regionSubAnim" class="kick-select">
+                                <option value="pop" selected>Pop-in</option>
+                                <option value="wave">Волна</option>
+                                <option value="shimmer">Переливы цвета</option>
+                                <option value="type">Печатка</option>
+                                <option value="rise">Подъём</option>
+                                <option value="spin">Ротейшн</option>
+                                <option value="tremble">Тряска</option>
+                                <option value="none">Без анимации</option>
+                            </select>
+                        </div>
+                        <div class="inspector-group">
+                            <label>Язык речи:</label>
+                            <select id="regionTranscribeLang" class="kick-select">
+                                <option value="ru" selected>Русский</option>
+                                <option value="en">English</option>
+                                <option value="">Авто</option>
+                            </select>
+                        </div>
+                        <div class="inspector-group">
+                            <label>Стиль слов:</label>
+                            <div class="mini-style-picker">
+                                <button class="mini-style-btn active" data-style="acid">TV Green</button>
+                                <button class="mini-style-btn" data-style="lime">TV Lime</button><button class="mini-style-btn" data-style="cyan">TV Cyan</button><button class="mini-style-btn" data-style="yellow">TV Yellow</button>
+                            </div>
+                        </div>
+                        <button class="primary-btn btn-full" id="regionTranscribeBtn">
+                            <span class="btn-text">Сгенерировать субтитры</span>
+                            <span class="spinner" id="regionTranscribeSpinner"></span>
+                        </button>
+                        <div class="inspector-actions" style="margin-top:8px">
+                            <button class="btn-sm btn-danger btn-full" id="regionDeleteBtn">
+                                Удалить нарезку
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="inspector-details hidden" id="inspectorDetails">
+                        <div class="inspector-header">
+                            <h4 id="inspectorClipTitle">Название клипа</h4>
+                            <span class="inspector-badge" id="inspectorTrackBadge">Слой V1</span>
+                        </div>
+
+                        <div class="inspector-group">
+                            <label>Начало на таймлайне:</label>
+                            <span class="mono-val" id="inspectorStartTime">00:00:00:00</span>
+                        </div>
+
+                        <div class="inspector-group">
+                            <label>Длительность клипа:</label>
+                            <span class="mono-val" id="inspectorDuration">00:00:12:00</span>
+                        </div>
+
+                        <div class="inspector-group" id="inspectorVolumeGroup">
+                            <label>Громкость звука:</label>
+                            <div class="range-row">
+                                <input type="range" id="clipVolumeSlider" min="0" max="100" value="100" />
+                                <span class="range-val" id="clipVolumeVal">100%</span>
+                            </div>
+                            <label class="sh-check" id="musicDuckRow" title="Фоновая музыка: автоматически пригибается под голос с видеодорожки">
+                                <input type="checkbox" id="musicDuckCheck" /> Фоновая музыка (дакинг под голос)
+                            </label>
+                        </div>
+
+                        <div class="inspector-group" id="inspectorOpacityGroup">
+                            <label>Прозрачность слоя:</label>
+                            <div class="range-row">
+                                <input type="range" id="clipOpacitySlider" min="0" max="100" value="100" />
+                                <span class="range-val" id="clipOpacityVal">100%</span>
+                            </div>
+                        </div>
+
+                        <!-- Text Element Editor (subtitles & free text, all params) -->
+                        <div class="inspector-section hidden" id="inspectorSubtitleSection">
+                            <div class="inspector-sec-header">
+                                <span class="inspector-sec-label" id="subEditorLabel">Редактирование текста</span>
+                                <span class="cloud-api-tag">Текст</span>
+                            </div>
+                            <div class="inspector-group" id="textTrackRow">
+                                <label>Слой текста:</label>
+                                <select id="textTrackSelect" class="kick-select"></select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Текст:</label>
+                                <textarea id="inspectorSubtitleTextInput" class="inspector-textarea" rows="2" placeholder="Текст..."></textarea>
+                            </div>
+                            <div class="inspector-group" id="textColorRow">
+                                <label>Цвет текста:</label>
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <input type="color" id="textColorInput" value="#ffffff" style="width:40px;height:30px;padding:0;border:none;background:transparent;cursor:pointer;" />
+                                    <span id="textColorHex" style="font-family:monospace;font-size:12px;color:var(--text-main);">#ffffff</span>
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Стиль оформления:</label>
+                                <div class="mini-style-picker">
+                                    <button class="mini-style-btn" data-style="mrbeast" style="color:#ffe600;font-weight:900;">MrBeast 3D</button>
+                                    <button class="mini-style-btn" data-style="hormozi" style="color:#ffe600;">Hormozi</button>
+                                    <button class="mini-style-btn" data-style="cyber_glitch" style="color:#00f2ff;">Cyber Glitch</button>
+                                    <button class="mini-style-btn" data-style="comic_pop" style="color:#ffe600;">Comic Pop</button>
+                                    <button class="mini-style-btn" data-style="golden_luxury" style="color:#ffe082;">Gold Luxury</button>
+                                    <button class="mini-style-btn" data-style="rage_red" style="color:#ff1c44;">Rage Red</button>
+                                    <button class="mini-style-btn" data-style="clean_editorial" style="color:#ffffff;">Clean Glass</button>
+                                    <button class="mini-style-btn" data-style="karaoke_spotlight" style="color:#00f2ff;">Spotlight</button>
+                                    <button class="mini-style-btn active" data-style="acid" style="color:#39ff14;">Acid Neon</button>
+                                    <button class="mini-style-btn" data-style="purple_phonk" style="color:#b026ff;">Phonk</button>
+                                    <button class="mini-style-btn" data-style="sunset_drift" style="color:#ffa200;">Sunset</button>
+                                    <button class="mini-style-btn" data-style="typewriter_terminal" style="color:#00ff66;">Terminal</button>
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Шрифт:</label>
+                                <select id="textFontSelect" class="kick-select">
+                                    <option value="Montserrat ExtraBold" selected>Montserrat ExtraBold</option>
+                                    <option value="Russo One">Russo One</option>
+                                    <option value="Dela Gothic One">Dela Gothic One</option>
+                                    <option value="Unbounded ExtraBold">Unbounded ExtraBold</option>
+                                    <option value="Oswald Bold">Oswald Bold</option>
+                                    <option value="Oswald SemiBold">Oswald SemiBold</option>
+                                    <option value="Sofia Sans Extra Condensed Black">Sofia Sans ExtraCond Black</option>
+                                    <option value="Alumni Sans Black">Alumni Sans Black</option>
+                                    <option value="Anton">Anton</option>
+                                    <option value="Exo 2 Black">Exo 2 Black</option>
+                                    <option value="Golos Text Black">Golos Text Black</option>
+                                    <option value="Onest Black">Onest Black</option>
+                                    <option value="Rubik Black">Rubik Black</option>
+                                    <option value="Nunito Black">Nunito Black</option>
+                                    <option value="Fira Sans Extra Bold">Fira Sans Extra Bold</option>
+                                    <option value="Wix Madefor Display ExtraBold">Wix Madefor ExtraBold</option>
+                                    <option value="M PLUS Rounded 1c">M PLUS Rounded 1c</option>
+                                    <option value="Prosto One">Prosto One</option>
+                                    <option value="Rubik Mono One">Rubik Mono One</option>
+                                    <option value="Play">Play Bold</option>
+                                    <option value="Press Start 2P">Press Start 2P</option>
+                                    <option value="Yeseva One">Yeseva One</option>
+                                    <option value="Lobster">Lobster</option>
+                                    <option value="Pacifico">Pacifico</option>
+                                    <option value="Caveat Bold">Caveat</option>
+                                    <option value="Marck Script">Marck Script</option>
+                                    <option value="Amatic SC">Amatic SC</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Размер <span id="textSizeVal">6%</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="textSizeSlider" min="3" max="180" value="60" />
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Свечение <span id="textGlowVal">55</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="textGlowSlider" min="0" max="100" value="55" />
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Обводка <span id="textStrokeVal">0</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="textStrokeSlider" min="0" max="24" value="0" />
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Интервал букв <span id="textSpacingVal">0</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="textSpacingSlider" min="-4" max="30" value="0" />
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Анимация появления:</label>
+                                <select id="textAnimInSelect" class="kick-select">
+                                    <option value="pop" selected>Pop-in (Пружинный зум)</option>
+                                    <option value="type">Печатка (по буквам)</option>
+                                    <option value="spin">Мягкий ротейшн (-12°→0°)</option>
+                                    <option value="wave">Волна</option>
+                                    <option value="rise">Подъём</option>
+                                    <option value="slide">Слайд слева</option>
+                                    <option value="slide_r">Слайд справа</option>
+                                    <option value="bounce">Бонк</option>
+                                    <option value="zoom">Зум-бласт</option>
+                                    <option value="none">Мгновенно</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Анимация исчезновения:</label>
+                                <select id="textAnimOutSelect" class="kick-select">
+                                    <option value="fade" selected>Фейд</option>
+                                    <option value="shrink">Сжатие</option>
+                                    <option value="slideout">Слайд вправо</option>
+                                    <option value="blurout">Растворение (блюр)</option>
+                                    <option value="spinout">Ротейшн-аут</option>
+                                    <option value="riseout">Улёт вверх</option>
+                                    <option value="none">Мгновенно</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group" id="textShakeRow">
+                                <label class="sh-check" title="Постоянное потрясывание текста (AE-style wiggle)">
+                                    <input type="checkbox" id="textShakeCheck" /> Тряска текста (Tremble / Shake)
+                                </label>
+                            </div>
+                            <div class="inspector-group" id="textPosRow">
+                                <label>Позиция X <span id="textXVal">50%</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="textXSlider" min="5" max="95" value="50" />
+                                </div>
+                                <label>Позиция Y <span id="textYVal">72%</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="textYSlider" min="5" max="95" value="72" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Auto-Transcribe via Groq Whisper API for media clips (V1, V2, A1) with FULL controls -->
+                        <div class="inspector-section hidden" id="inspectorTranscribeSection">
+                            <div class="inspector-sec-header">
+                                <span class="inspector-sec-label">Генерация субтитров</span>
+                                <span class="cloud-api-tag">WHISPER AI</span>
+                            </div>
+                            <p class="inspector-sec-hint">
+                                Распознавание речи и создание анимированных титров студийного уровня.
+                            </p>
+                            <div class="inspector-group">
+                                <label>Целевой слой субтитров:</label>
+                                <select id="inspectorTranscribeTrack" class="kick-select">
+                                    <!-- Populated dynamically -->
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Язык аудиодорожки:</label>
+                                <select id="inspectorTranscribeLang" class="kick-select">
+                                    <option value="ru" selected>Русский (RU)</option>
+                                    <option value="en">English (EN)</option>
+                                    <option value="">Автоопределение</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Стиль палитры (неон):</label>
+                                <div class="mini-style-picker" id="inspectorStylePicker">
+                                    <button class="mini-style-btn" data-style="mrbeast" style="color:#ffe600;font-weight:900;">MrBeast 3D</button>
+                                    <button class="mini-style-btn" data-style="hormozi" style="color:#ffe600;">Hormozi</button>
+                                    <button class="mini-style-btn" data-style="cyber_glitch" style="color:#00f2ff;">Cyber Glitch</button>
+                                    <button class="mini-style-btn" data-style="comic_pop" style="color:#ffe600;">Comic Pop</button>
+                                    <button class="mini-style-btn" data-style="golden_luxury" style="color:#ffe082;">Gold Luxury</button>
+                                    <button class="mini-style-btn" data-style="rage_red" style="color:#ff1c44;">Rage Red</button>
+                                    <button class="mini-style-btn" data-style="clean_editorial" style="color:#ffffff;">Clean Glass</button>
+                                    <button class="mini-style-btn" data-style="karaoke_spotlight" style="color:#00f2ff;">Spotlight</button>
+                                    <button class="mini-style-btn active" data-style="acid" style="color:#39ff14;">Acid Neon</button>
+                                    <button class="mini-style-btn" data-style="purple_phonk" style="color:#b026ff;">Phonk</button>
+                                    <button class="mini-style-btn" data-style="sunset_drift" style="color:#ffa200;">Sunset</button>
+                                    <button class="mini-style-btn" data-style="typewriter_terminal" style="color:#00ff66;">Terminal</button>
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Шрифт титров:</label>
+                                <select id="inspectorTranscribeFont" class="kick-select">
+                                    <option value="Montserrat ExtraBold" selected>Montserrat ExtraBold</option>
+                                    <option value="Russo One">Russo One</option>
+                                    <option value="Dela Gothic One">Dela Gothic One</option>
+                                    <option value="Unbounded ExtraBold">Unbounded ExtraBold</option>
+                                    <option value="Exo 2 Black">Exo 2 Black</option>
+                                    <option value="Rubik Black">Rubik Black</option>
+                                    <option value="Sofia Sans Extra Condensed Black">Sofia Sans ExtraCond Black</option>
+                                    <option value="Oswald Bold">Oswald Bold</option>
+                                    <option value="Anton">Anton</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Размер шрифта <span id="inspectorTranscribeSizeVal">6%</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="inspectorTranscribeSizeSlider" min="3" max="15" value="6" />
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Сила неонового свечения <span id="inspectorTranscribeGlowVal">75%</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="inspectorTranscribeGlowSlider" min="0" max="100" value="75" />
+                                </div>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Анимация текста:</label>
+                                <select id="inspectorTranscribeAnim" class="kick-select">
+                                    <option value="pop" selected>Пружинный зум (Pop-in)</option>
+                                    <option value="spin">Мягкий ротейшн (-12° → 0°)</option>
+                                    <option value="wave">Волнообразный эффект (Wave)</option>
+                                    <option value="shimmer">Переливание цвета (Shimmer)</option>
+                                    <option value="type">Печатная машинка (по буквам)</option>
+                                    <option value="tremble">Тряска текста (Tremble / Shake)</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Слов на фрагмент:</label>
+                                <select id="inspectorWordsPerCue" class="kick-select">
+                                    <option value="1">1 слово (караоке)</option>
+                                    <option value="2">до 2 слов</option>
+                                    <option value="3" selected>до 3 слов</option>
+                                    <option value="5">до 5 слов</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label class="sh-check" title="Выделять эмоциональные слова ярким акцентом">
+                                    <input type="checkbox" id="inspectorTranscribeHotWords" checked /> Подсветка ключевых слов (акцент)
+                                </label>
+                            </div>
+                            <button class="primary-btn btn-full" id="inspectorTranscribeBtn">
+                                <span class="btn-text">Сгенерировать субтитры</span>
+                                <span class="spinner" id="inspectorTranscribeSpinner"></span>
+                            </button>
+                        </div>
+
+                        <!-- FX Element Editor (вспышки / полосы / тряска) -->
+                        <div class="inspector-section hidden" id="inspectorFxSection">
+                            <div class="inspector-sec-header">
+                                <span class="inspector-sec-label">Эффект на слое</span>
+                                <span class="cloud-api-tag">FX</span>
+                            </div>
+                            <div class="inspector-group" id="fxTrackRow">
+                                <label>Слой эффекта:</label>
+                                <select id="fxTrackSelect" class="kick-select"></select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Тип:</label>
+                                <select id="fxKindSelect" class="kick-select">
+                                    <option value="flash">Вспышка</option>
+                                    <option value="bars">Сужение границ (полосы)</option>
+                                    <option value="shake">Тряска видео</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group" id="fxColorRow">
+                                <label>Цвет вспышки:</label>
+                                <select id="fxColorSelect" class="kick-select">
+                                    <option value="white">Белая (щёлк камеры)</option>
+                                    <option value="green">Зелёная (аппрув)</option>
+                                    <option value="red">Красная (кансел)</option>
+                                    <option value="bw">Чёрно-белая (вуш)</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group" id="fxPeakRow">
+                                <label>Сила наложения <span id="fxPeakVal">75%</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="fxPeakSlider" min="10" max="100" value="75" />
+                                </div>
+                            </div>
+                            <div class="inspector-group" id="fxSoundRow">
+                                <label>Звук вспышки / эффекта:</label>
+                                <select id="fxSoundSelect" class="kick-select">
+                                    <option value="camera_click">Щелчок камеры (для белой)</option>
+                                    <option value="click_hard">Жёсткий щелчок</option>
+                                    <option value="approve">Аппрув / Динг (для зелёной)</option>
+                                    <option value="cancel">Кансел / Баззер (для красной)</option>
+                                    <option value="whoosh_fast">Вуш быстрый (для ч/б)</option>
+                                    <option value="whoosh_cinematic">Вуш кинематографичный</option>
+                                    <option value="magic">Магия / спаркл</option>
+                                    <option value="pop">Поп игровой</option>
+                                    <option value="pop_light">Лёгкий поп</option>
+                                    <option value="boom">Эпик-импакт</option>
+                                    <option value="hit">Удар / хит</option>
+                                    <option value="cheer">Улюлюкания толпы</option>
+                                    <option value="cheer_big">Рёв победы</option>
+                                    <option value="applause">Овации</option>
+                                    <option value="laugh">Смех толпы</option>
+                                    <option value="laugh_big">Громкий смех</option>
+                                    <option value="levelup">Левел-ап</option>
+                                    <option value="coin">Монетка</option>
+                                    <option value="none">Без звука</option>
+                                </select>
+                            </div>
+                            <div class="inspector-group">
+                                <label>Громкость звука <span id="fxGainVal">100%</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="fxGainSlider" min="0" max="200" value="100" />
+                                </div>
+                            </div>
+                            <div class="inspector-group" id="fxBarHRow">
+                                <label>Глубина сужения <span id="fxBarHVal">120px</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="fxBarHSlider" min="40" max="600" value="120" />
+                                </div>
+                            </div>
+                            <div class="inspector-group" id="fxAmpRow">
+                                <label>Амплитуда тряски <span id="fxAmpVal">12px</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="fxAmpSlider" min="2" max="40" value="12" />
+                                </div>
+                            </div>
+                            <div class="inspector-group" id="fxFreqRow">
+                                <label>Частота тряски <span id="fxFreqVal">7 Гц</span>:</label>
+                                <div class="range-row">
+                                    <input type="range" id="fxFreqSlider" min="2" max="15" value="7" />
+                                </div>
+                            </div>
+                            <p class="inspector-sec-hint">Длительность = длина блока на слое (тяни за края). Действует на слои ниже, текст сверху не трогает.</p>
+                        </div>
+
+                        <!-- Object Tracking: clip follows a selected object -->
+                        <div class="inspector-section hidden" id="inspectorTrackingSection">
+                            <div class="inspector-sec-header">
+                                <span class="inspector-sec-label">Трекинг объекта</span>
+                                <span class="cloud-api-tag">Motion</span>
+                            </div>
+                            <p class="inspector-sec-hint">
+                                Выдели объект рамкой прямо на мониторе — клип будет следовать за ним весь отрезок. Трек считает сервер (cv2), траекторию можно применить в экспорте.
+                            </p>
+                            <div class="tracking-btn-row">
+                                <button class="btn-sm btn-secondary" id="trackSelectBtn">Выделить объект</button>
+                                <button class="btn-sm btn-accent" id="trackRunBtn">Трекать</button>
+                                <button class="btn-sm btn-danger" id="trackClearBtn" title="Убрать трек с клипа">Сброс</button>
+                            </div>
+                            <div class="tracking-status" id="trackingStatus">Рамка не задана</div>
+                        </div>
+
+                        <div class="inspector-actions">
+                            <button class="btn-sm btn-danger btn-full" id="inspectorDeleteBtn">
+                                Удалить клип со слоя
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="dock-resizer" id="dockResizer" title="Потяните, чтобы изменить ширину панели"></div>
+            </aside>
+
+            <!-- Center/Right: Video Preview Monitor -->
+            <main class="preview-panel">
+                <div class="monitor-wrapper">
+                    <!-- Monitor Screen -->
+                    <div class="video-monitor" id="videoMonitor">
+                        <video id="studioVideoPlayer" preload="auto" playsinline></video>
+                        <!-- TV 9:16 composite preview (как будет в экспорте: сплит/фулл + PIP + субтитры) -->
+                        <div class="tv-preview hidden" id="tvPreview">
+                            <div class="tvp-top" id="tvpTop"><video id="tvpTopVideo" muted playsinline preload="auto"></video></div>
+                            <div class="tvp-bottom" id="tvpBottom"><video id="tvpBottomVideo" muted playsinline preload="auto"></video></div>
+                            <div class="tvp-pip hidden" id="tvpPip"><video id="tvpPipVideo" muted playsinline preload="auto"></video></div>
+                            <div class="tvp-flash hidden" id="tvpFlash"></div>
+                            <div class="tvp-subs" id="tvpSubs"></div>
+                            <div class="tvp-badge">9:16 превью</div>
+                        </div>
+                        <!-- Solo area picker: выбранный слой на весь экран, рамка с пропорциями -->
+                        <div class="pick-solo hidden" id="pickSolo">
+                            <video id="pickSoloVideo" muted playsinline preload="auto"></video>
+                            <div class="pick-box" id="pickBox">
+                                <div class="pick-handle" id="pickHandle" title="Тяни — размер с сохранением пропорций"></div>
+                                <div class="pick-label" id="pickLabel">область</div>
+                            </div>
+                            <div class="pick-bar">
+                                <span id="pickHint">Тяни рамку и уголок — пропорции зафиксированы под 9:16</span>
+                                <button class="btn-sm btn-accent" id="pickConfirmBtn">Готово ✓</button>
+                                <button class="btn-sm btn-secondary" id="pickCancelBtn">Отмена</button>
+                            </div>
+                        </div>
+                        <div class="badge-monitor-overlay hidden" id="badgeMonitorOverlay">TWITCH @STREAMER</div>
+                        <div class="subtitles-monitor-overlay" id="subtitlesMonitorOverlay"></div>
+                        <div class="monitor-overlay" id="monitorOverlay">
+                            <div class="no-clip-placeholder" id="noClipPlaceholder">
+                                <div class="monitor-icon">▶</div>
+                                <h3>Монитор предпросмотра</h3>
+                                <p>Перетащите видео из Библиотеки ресурсов на панель слоев внизу</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Transport / Playback Controls Bar -->
+                    <div class="monitor-controlbar">
+                        <div class="controlbar-left">
+                            <span class="monitor-tc" id="monitorCurrentTc">00:00:00:00</span>
+                        </div>
+
+                        <div class="controlbar-center">
+                            <button class="transport-btn" id="btnToStart" title="В начало проекта (Home)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                                </svg>
+                            </button>
+                            <button class="transport-btn" id="btnStepBack" title="На 1 кадр назад (< или ,)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/>
+                                </svg>
+                            </button>
+                            <button class="transport-btn play-main-btn" id="btnPlayPause" title="Воспроизведение / Пауза (Пробел)">
+                                <svg class="play-icon" id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                                <svg class="pause-icon hidden" id="pauseIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="6" y="4" width="4" height="16"></rect>
+                                    <rect x="14" y="4" width="4" height="16"></rect>
+                                </svg>
+                            </button>
+                            <button class="transport-btn" id="btnStepForward" title="На 1 кадр вперед (> или .)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/>
+                                </svg>
+                            </button>
+                            <button class="transport-btn" id="btnToEnd" title="В конец (End)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div class="controlbar-right">
+                            <button class="aspect-pill-btn" id="aspectRatioToggleBtn" title="Переключить соотношение сторон 16:9 / 9:16 Shorts">16:9</button>
+                            
+                            <div class="volume-box">
+                                <button class="icon-btn-ghost" id="muteToggleBtn" title="Вкл/Выкл звук">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                    </svg>
+                                </button>
+                                <input type="range" class="mini-volume" id="monitorVolume" min="0" max="1" step="0.05" value="1" />
+                            </div>
+
+                            <button class="icon-btn-ghost" id="fullscreenBtn" title="Во весь экран">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Bottom: Layers & Timeline Panel (Панель слоев видеоредактирования) -->
+        <footer class="studio-timeline-panel" id="timelinePanel">
+            <div class="timeline-resizer" id="timelineResizer" title="Потяните, чтобы изменить высоту таймлайна"></div>
+            <!-- Timeline Toolbar -->
+            <div class="timeline-toolbar">
+                <div class="tb-left">
+                    <button class="tb-btn active" id="toolSelectBtn" title="Инструмент выделения и перемещения (V)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                            <path d="M3 3l7 18 3-7 7-3L3 3z"></path>
+                        </svg>
+                        <span>Выбор</span>
+                    </button>
+                    <button class="tb-btn" id="toolSplitBtn" title="Разрезать клип по скрабберу (C / Ножницы)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                            <circle cx="6" cy="6" r="3"></circle>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+                            <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+                            <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+                        </svg>
+                        <span>Разрезать</span>
+                    </button>
+                    <button class="tb-btn" id="toolDeleteBtn" title="Удалить выбранный клип (Delete)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                        <span>Удалить</span>
+                    </button>
+                    <div class="tb-sep"></div>
+                    <!-- Regions: нарезки на экспорт прямо на таймлайне (единое понятие с очередью экспорта) -->
+                    <div class="tb-markers" id="tbMarkers">
+                        <button class="tb-btn tb-accent" id="tlAddRegionBtn" title="Создать нарезку от плейхеда (5с) — тяни за края прямо на полосе нарезок (N)">+ Нарезка</button>
+                        <button class="tb-btn" id="tlPreviewRegionBtn" title="Проиграть выбранную нарезку">▶</button>
+                        <span class="marker-dur mono ok" id="tlRegionDur" title="Длина выбранной нарезки">--:--</span>
+                        <button class="tb-btn tb-ghost" id="tlSplitRegionBtn" title="Разделить выбранную нарезку по плейхеду на две (S)">Разделить</button>
+                        <button class="tb-btn tb-ghost" id="tlDeleteRegionBtn" title="Удалить выбранную нарезку">✕</button>
+                    </div>
+                    <div class="tb-sep"></div>
+                    <button class="tb-btn tb-ghost" id="timelineClearBtn" title="Очистить все дорожки таймлайна">
+                        <span>Очистить таймлайн</span>
+                    </button>
+                </div>
+
+                <div class="tb-right">
+                    <span class="zoom-label">Масштаб:</span>
+                    <button class="zoom-btn" id="zoomOutBtn" title="Уменьшить масштаб">-</button>
+                    <input type="range" id="timelineZoomSlider" min="8" max="400" value="80" title="Масштаб таймлайна (пикселей в секунду)" />
+                    <button class="zoom-btn" id="zoomInBtn" title="Увеличить масштаб">+</button>
+                    <button class="tb-btn tb-ghost" id="zoomFitBtn" title="Масштабировать по длительности клипов">
+                        <span>Fit</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Timeline Tracks Canvas and Playhead Container -->
+            <div class="timeline-scroll-container" id="timelineScrollContainer">
+                <div class="timeline-viewport" id="timelineViewport">
+                    <!-- Left: Track Headers Column (rendered dynamically — unlimited layers) -->
+                    <div class="track-headers-col">
+                        <div class="ruler-header-spacer">
+                            <span class="layers-title">СЛОИ</span>
+                            <div class="layers-add-btns">
+                                <button class="layer-add-btn" id="addVideoTrackBtn" title="Добавить слой видео">+Видео</button>
+                                <button class="layer-add-btn" id="addAudioTrackBtn" title="Добавить дорожку звука">+Звук</button>
+                                <button class="layer-add-btn" id="addTextClipBtn" title="Добавить текст на слой титров">+Текст</button>
+                                <button class="layer-add-btn" id="addTextTrackBtn" title="Новый отдельный слой текста / субтитров">+Слой Текста</button>
+                                <button class="layer-add-btn accent" id="addFxBtn" title="Добавить эффект: вспышка / сужение границ / тряска (настраивается в инспекторе)">+Эффект</button>
+                                <button class="layer-add-btn" id="addFxTrackBtn" title="Новый слой эффектов над текстом">+Слой FX</button>
+                            </div>
+                        </div>
+                        <div id="trackHeadersList"></div>
+                    </div>
+
+                    <!-- Right: Time Ruler & Track Lanes (Scrollable, lanes rendered dynamically) -->
+                    <div class="track-lanes-area" id="trackLanesArea">
+                        <!-- Time Ruler at top -->
+                        <div class="time-ruler" id="timeRuler">
+                            <canvas id="rulerCanvas" height="28"></canvas>
+                        </div>
+
+                        <!-- Tracks Lanes Container -->
+                        <div class="lanes-container" id="lanesContainer">
+                            <div class="marker-range hidden" id="markerRange"></div>
+
+                            <!-- Interactive Red Playhead (Скраббер) -->
+                            <div class="playhead" id="playhead">
+                                <div class="playhead-head" id="playheadHead">
+                                    <div class="playhead-marker"></div>
+                                </div>
+                                <div class="playhead-line"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Core App Logic & Studio Engine Scripts -->
+    <script>
+        /* Внутристраничные уведомления вместо модальных alert() — не блокируют интерфейс */
+        window.showToast = function (message, kind, ms) {
+            try {
+                kind = kind || "info";
+                let box = document.getElementById("toastBox");
+                if (!box) {
+                    box = document.createElement("div");
+                    box.id = "toastBox";
+                    box.style.cssText = "position:fixed;top:64px;right:16px;z-index:10000;display:flex;flex-direction:column;gap:8px;max-width:400px;pointer-events:none;";
+                    document.body.appendChild(box);
+                }
+                const t = document.createElement("div");
+                const colors = { ok: "#1db954", err: "#e8384f", info: "#2f9dff" };
+                const icons = { ok: "✓", err: "✕", info: "i" };
+                const c = colors[kind] || colors.info;
+                t.style.cssText = "pointer-events:auto;cursor:pointer;display:flex;gap:10px;align-items:flex-start;background:#141821;color:#e8ecf2;border:1px solid rgba(255,255,255,0.08);border-left:4px solid " + c + ";border-radius:10px;padding:10px 14px;font:13px/1.45 'Montserrat',system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,0.45);opacity:0;transform:translateX(14px);transition:opacity 0.18s,transform 0.18s;word-break:break-word;";
+                const icon = document.createElement("span");
+                icon.style.cssText = "flex:0 0 auto;font-weight:800;color:" + c + ";";
+                icon.textContent = icons[kind] || icons.info;
+                const body = document.createElement("span");
+                body.textContent = String(message);
+                t.appendChild(icon);
+                t.appendChild(body);
+                let gone = false;
+                const dismiss = () => {
+                    if (gone) return;
+                    gone = true;
+                    t.style.opacity = "0";
+                    t.style.transform = "translateX(14px)";
+                    setTimeout(() => t.remove(), 200);
+                };
+                t.addEventListener("click", dismiss);
+                box.appendChild(t);
+                requestAnimationFrame(() => { t.style.opacity = "1"; t.style.transform = "none"; });
+                setTimeout(dismiss, ms || (kind === "err" ? 6500 : 3800));
+            } catch (e) { /* уведомление не должно ломать поток */ }
+        };
+
+        // Внутристраничные модалки подтверждения и ввода (вместо confirm/prompt)
+        window.showConfirm = function (message, okLabel) {
+            return new Promise(resolve => {
+                const ov = document.createElement("div");
+                ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10010;display:flex;align-items:center;justify-content:center;";
+                const card = document.createElement("div");
+                card.style.cssText = "background:#171b24;border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px 22px;max-width:420px;font:14px/1.5 'Montserrat',system-ui,sans-serif;color:#e8ecf2;box-shadow:0 12px 40px rgba(0,0,0,0.6);";
+                const msg = document.createElement("div");
+                msg.style.cssText = "margin-bottom:18px;";
+                msg.textContent = String(message);
+                const row = document.createElement("div");
+                row.style.cssText = "display:flex;gap:10px;justify-content:flex-end;";
+                const cancel = document.createElement("button");
+                cancel.textContent = "Отмена";
+                cancel.style.cssText = "background:#232a36;color:#cfd6e0;border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 16px;cursor:pointer;font:13px 'Montserrat',system-ui,sans-serif;";
+                const ok = document.createElement("button");
+                ok.textContent = okLabel || "ОК";
+                ok.style.cssText = "background:#2f9dff;color:#fff;border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font:600 13px 'Montserrat',system-ui,sans-serif;";
+                let done = false;
+                const fin = v => { if (done) return; done = true; ov.remove(); document.removeEventListener("keydown", key); resolve(v); };
+                const key = e => { if (e.key === "Escape") fin(false); if (e.key === "Enter") fin(true); };
+                ok.addEventListener("click", () => fin(true));
+                cancel.addEventListener("click", () => fin(false));
+                ov.addEventListener("click", e => { if (e.target === ov) fin(false); });
+                document.addEventListener("keydown", key);
+                row.appendChild(cancel); row.appendChild(ok);
+                card.appendChild(msg); card.appendChild(row);
+                ov.appendChild(card);
+                document.body.appendChild(ov);
+                ok.focus();
+            });
+        };
+        window.showPrompt = function (title, value) {
+            return new Promise(resolve => {
+                const ov = document.createElement("div");
+                ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10010;display:flex;align-items:center;justify-content:center;";
+                const card = document.createElement("div");
+                card.style.cssText = "background:#171b24;border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px 22px;width:360px;font:14px/1.5 'Montserrat',system-ui,sans-serif;color:#e8ecf2;box-shadow:0 12px 40px rgba(0,0,0,0.6);";
+                const msg = document.createElement("div");
+                msg.style.cssText = "margin-bottom:12px;";
+                msg.textContent = String(title);
+                const inp = document.createElement("input");
+                inp.value = value != null ? String(value) : "";
+                inp.style.cssText = "width:100%;box-sizing:border-box;background:#0f1218;color:#e8ecf2;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:9px 12px;font:14px 'Montserrat',system-ui,sans-serif;margin-bottom:16px;outline:none;";
+                inp.addEventListener("focus", () => inp.select());
+                const row = document.createElement("div");
+                row.style.cssText = "display:flex;gap:10px;justify-content:flex-end;";
+                const cancel = document.createElement("button");
+                cancel.textContent = "Отмена";
+                cancel.style.cssText = "background:#232a36;color:#cfd6e0;border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 16px;cursor:pointer;font:13px 'Montserrat',system-ui,sans-serif;";
+                const ok = document.createElement("button");
+                ok.textContent = "Сохранить";
+                ok.style.cssText = "background:#2f9dff;color:#fff;border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font:600 13px 'Montserrat',system-ui,sans-serif;";
+                let done = false;
+                const fin = v => { if (done) return; done = true; ov.remove(); document.removeEventListener("keydown", key); resolve(v); };
+                const key = e => { if (e.key === "Escape") fin(null); if (e.key === "Enter") fin(inp.value); };
+                ok.addEventListener("click", () => fin(inp.value));
+                cancel.addEventListener("click", () => fin(null));
+                ov.addEventListener("click", e => { if (e.target === ov) fin(null); });
+                document.addEventListener("keydown", key);
+                row.appendChild(cancel); row.appendChild(ok);
+                card.appendChild(msg); card.appendChild(inp); card.appendChild(row);
+                ov.appendChild(card);
+                document.body.appendChild(ov);
+                setTimeout(() => { inp.focus(); inp.select(); }, 30);
+            });
+        };
+    </script>
+    <script src="editor.js?v=12"></script>
+    <script src="app.js?v=12"></script>
+</body>
+</html>
+
+

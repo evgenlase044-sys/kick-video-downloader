@@ -1,0 +1,72 @@
+# ==============================================================================
+# Git Ignore - Kick Video Downloader & Archiver
+# ==============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+*.egg-info/
+.pytest_cache/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Rust / Engine outputs
+target/
+engine/target/
+engine/output/
+engine/preview/
+
+# Sensitive credentials & tokens
+.env
+.env.*
+!.env.example
+cookies.json
+cookies.txt
+save_cookies.py
+
+# Binaries and compiled outputs
+*.exe
+*.dll
+*.pdb
+*.exp
+*.lib
+*.dylib
+
+# Video downloads & large media chunks
+downloads/
+*.ts
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.flv
+*.webm
+
+# Scratchpad, temporary frames, and test screenshots
+scratch/
+tmp_ref3/
+test_*.png
+src*.png
+
+# Logs
+*.log
+server_log.txt
+
+# OS & IDE metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+.gemini/

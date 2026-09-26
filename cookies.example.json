@@ -1,0 +1,10 @@
+[
+  {
+    "domain": ".kick.com",
+    "name": "session_token",
+    "value": "YOUR_SESSION_TOKEN_HERE",
+    "path": "/",
+    "secure": true,
+    "httpOnly": true
+  }
+]
