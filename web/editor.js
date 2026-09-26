@@ -226,6 +226,24 @@
             } else if (e.code === "KeyX") {
                 // §7.3: шейк 14 px / 350 мс в плейхеде
                 addEffectAtPlayhead("shake", "white", { duration: 0.35, fxAmp: 14, fxSound: "whoosh_fast" });
+            } else if (e.code === "KeyZ") {
+                // §7.3: zoom punch 1->1.15, пружина 12%/220 мс (+ радиальный смаз в рендерере)
+                addEffectAtPlayhead("zoom", "white", { duration: 0.35, fxPeak: 0.15, fxSound: "whoosh_cinematic" });
+            } else if (e.code === "KeyL") {
+                // §7.3: Lens punch (§13.3): бочка + CA, 250 мс
+                addEffectAtPlayhead("lens", "white", { duration: 0.25, fxPeak: 0.18, fxSound: "whoosh_magic" });
+            } else if (e.code === "KeyB") {
+                // §7.3: threshold hit, 2 кадра
+                addEffectAtPlayhead("threshold", "white", { duration: 0.067, fxPeak: 0.45, fxSound: "hit_small" });
+            } else if (e.code === "KeyW") {
+                // §7.3: whip-переход НА БЛИЖАЙШЕМ РЕЗЕ
+                addEffectAtPlayhead("whip", "white", { duration: 0.12, fxSound: "whoosh_fast", snapToCut: true });
+            } else if (e.code === "KeyR") {
+                // §7.3: speed ramp 0.35x -> 1.8x вокруг плейхеда (маркер для рендерера)
+                addEffectAtPlayhead("ramp", "white", { duration: 0.6, fxSound: "riser" });
+            } else if (e.code === "KeyE") {
+                // §7.3: стоп-кадр + зум 0.6 с (маркер для рендерера)
+                addEffectAtPlayhead("freeze", "white", { duration: 0.6, fxSound: "camera_click" });
             } else if (e.code === "KeyP" && e.altKey) {
                 saveChannelPreset();
             } else if (e.code === "KeyP") {
@@ -3547,6 +3565,74 @@
             });
             return { items, skipped };
         }
+        // §7.4/§7.6: очередь экспорта — пакет уходит в фон, редактор остаётся живым
+        const queueExportBtn = document.createElement("button");
+        queueExportBtn.id = "exportQueueBtn";
+        queueExportBtn.className = (exportPackBtn && exportPackBtn.className) || "btn";
+        queueExportBtn.textContent = "⏳ В очередь";
+        queueExportBtn.title = "Поставить все нарезки в очередь экспорта (рендер в фоне, прогресс через SSE)";
+        if (exportPackBtn && exportPackBtn.parentElement) {
+            exportPackBtn.parentElement.insertBefore(queueExportBtn, exportPackBtn.nextSibling);
+        }
+        queueExportBtn.addEventListener("click", async () => {
+            const built = buildExportItems();
+            if (!built.items.length) {
+                showToast("Нет нарезок для очереди — создай хотя бы одну (+ Нарезка).", "info");
+                return;
+            }
+            try {
+                const res = await fetch("/api/export-queue", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        clips: built.items.map(p => {
+                            const { segment_files, ...rest } = p;
+                            return { ...rest, overlay_file: null, track_path: null };
+                        }),
+                        name_template: state.clipper.nameTemplate || "{channel}_{date}_{n}_{title}"
+                    })
+                });
+                if (!res.ok) {
+                    showToast("Очередь отклонила запрос: " + (await res.text()), "err");
+                    return;
+                }
+                showToast(`В очереди: ${(await res.json()).queued} нарезок. Рендер идёт в фоне.`, "ok");
+                listenExportQueue();
+            } catch (e) {
+                showToast("Ошибка очереди: " + e.message, "err");
+            }
+        });
+
+        let queueES = null;
+        function listenExportQueue() {
+            if (queueES) queueES.close();
+            const statusText = document.getElementById("exportStatusText");
+            const statusBox = document.getElementById("exportStatusBox");
+            if (statusBox) statusBox.classList.remove("hidden");
+            queueES = new EventSource("/api/export-queue/stream");
+            queueES.onmessage = (ev) => {
+                const m = JSON.parse(ev.data);
+                if (m.type === "progress") {
+                    if (statusText) statusText.textContent =
+                        `Очередь экспорта: ${m.done}/${m.total}` +
+                        (m.current ? ` — рендерится «${m.current.title}»` : "");
+                } else if (m.type === "end") {
+                    if (statusText) statusText.textContent =
+                        `Очередь экспорта завершена: ${m.done}/${m.total}. Файлы в downloads/exported_packs.`;
+                    queueES.close();
+                    queueES = null;
+                    fetchLibrary();
+                }
+            };
+            queueES.onerror = () => {
+                if (queueES) { queueES.close(); queueES = null; }
+            };
+        }
+        // если очередь уже крутится (перезагрузка страницы) — подключаемся снова
+        fetch("/api/export-queue/status").then(r => r.json()).then(st => {
+            if (st && st.running) listenExportQueue();
+        }).catch(() => {});
+
         // Batch Pack highlights
         const addHighlightBtn = document.getElementById("addHighlightToPackBtn");
         const exportPackBtn = document.getElementById("exportPackBtn");
@@ -5124,6 +5210,11 @@
     // §7.3: «эффект в точке плейхеда» одной клавишей, с дефолтными параметрами
     // и дефолтным SFX. Переходный путь поддерживает flash / bars / shake (§15).
     function addEffectAtPlayhead(kind, color, overrides) {
+        // §7.3 (W): whip ставится на ближайший рез (граница нарезки/клипа)
+        if (overrides && overrides.snapToCut) {
+            const cut = nearestCutTo(state.currentTime);
+            if (cut != null) seekTo(cut);
+        }
         const before = (state.tracks[tidOfFx()] || []).length;
         addFxClip(kind, color);
         const tid = tidOfFx();
@@ -5133,6 +5224,24 @@
         if (c && c.isFx && overrides) Object.assign(c, overrides);
         renderTimeline();
         saveProject();
+    }
+    function nearestCutTo(t) {
+        const cuts = [];
+        for (const r of sortedRegions()) {
+            cuts.push(r.startTime, r.startTime + r.duration);
+        }
+        for (const tid of videoTrackIds()) {
+            for (const c of (state.tracks[tid] || [])) {
+                if (!c.media || c.isFx) continue;
+                cuts.push(c.startTime, c.startTime + c.duration);
+            }
+        }
+        let best = null, bestD = 1.5;
+        for (const c of cuts) {
+            const d = Math.abs(c - t);
+            if (d < bestD) { bestD = d; best = c; }
+        }
+        return best;
     }
     function tidOfFx() {
         const order = trackOrder();

@@ -17,6 +17,8 @@
     const LUT = (typeof CoreLut3D !== "undefined") ? CoreLut3D : require("../lut3d.js");
     const LENS = (typeof CoreLens !== "undefined") ? CoreLens : require("./lens.js");
     const GRADE = (typeof CoreGrade !== "undefined") ? CoreGrade : require("./grade.js");
+    const LUTM = (typeof CoreLut3D !== "undefined") ? CoreLut3D : require("../lut3d.js");
+    const EF = (typeof CoreEffects !== "undefined") ? CoreEffects : require("./effects.js");
 
     /**
      * renderFrame(comp, f, scale) -> draw list.
@@ -35,10 +37,61 @@
         const ops = [];
         const videoLayers = comp.layers.filter(l => l.type === "video");
         // bottom (z high) -> top (z low): list order = paint order
+        // fx layers (§15): flash + shake offsets + zoom/lens/threshold/whip
+        let shake = { dx: 0, dy: 0 };
+        let zoom = { scale: 1, radialForce: 0 };
+        let lensP = null;
+        let thresholdOn = false;
+        const timeRemaps = [];
+        for (const layer of comp.layers) {
+            if (layer.type !== "fx") continue;
+            const st = evalFx(layer, t, fps);
+            if (!st && layer.kind !== "ramp" && layer.kind !== "freeze") continue;
+            if (layer.kind === "flash") ops.push({ op: "flash", color: layer.color || "white", alpha: st });
+            if (layer.kind === "shake") {
+                shake.dx += (layer.amp || 12) * st * Math.sin(2 * Math.PI * (layer.freq || 7) * t);
+                shake.dy += (layer.amp || 12) * st * Math.cos(2 * Math.PI * (layer.freq || 7) * 9 / 7 * t);
+            }
+            if (layer.kind === "zoom") {
+                const zp = EF.zoomPunch(t, { A: layer.amp != null ? layer.amp : 0.15,
+                                             overshoot: 0.12, settleMs: 220,
+                                             at: layer.in != null ? layer.in : layer.start });
+                zoom = zp;
+            }
+            if (layer.kind === "lens") {
+                lensP = lensPunchState(layer, t);
+            }
+            if (layer.kind === "threshold") thresholdOn = t >= (layer.in != null ? layer.in : layer.start) &&
+                                                  t <= (layer.out != null ? layer.out : layer.end);
+            if (layer.kind === "whip") {
+                const w = EF.whip(t, { at: layer.in != null ? layer.in : layer.start,
+                                       durMs: ((layer.out != null ? layer.out : layer.end) -
+                                               (layer.in != null ? layer.in : layer.start)) * 1000,
+                                       dir: layer.color === "left" ? -1 : 1 });
+                shake.dx += w.dx * W;
+            }
+            if (layer.kind === "freeze" || layer.kind === "ramp") {
+                timeRemaps.push({ kind: layer.kind, s0: layer.in != null ? layer.in : layer.start,
+                                  e0: layer.out != null ? layer.out : layer.end });
+            }
+        }
+
         const sorted = videoLayers.slice().sort((a, b) => (b.z || 0) - (a.z || 0));
 
         for (const layer of sorted) {
-            const mt = CMP.mapTime(layer, t);
+            let mt = CMP.mapTime(layer, t);
+            // §15 time-remap: freeze holds the source time, ramp re-times it
+            const remap = timeRemaps.find(r => t >= r.s0 && t <= r.e0);
+            if (remap) {
+                const srcAtStart = CMP.mapTime(layer, remap.s0).src;
+                if (remap.kind === "freeze") {
+                    mt = { local: mt.local, src: srcAtStart };
+                } else {
+                    const local = t - remap.s0;
+                    mt = { local: mt.local, src: srcAtStart + 0.35 * local +
+                           integrateRamp(local, remap.e0 - remap.s0) };
+                }
+            }
             const asset = assets[layer.asset];
             if (!asset) continue;
             const srcRect = srcRectForLayer(layer, mt.src, asset);
@@ -51,6 +104,7 @@
                 dstRect = GEO.coverInto(srcRect, 0, 0, W, H);
             }
             // attach normalized source & destination rects (scale-free)
+            dstRect.srcT = mt.src;
             dstRect.op = "video";
             dstRect.asset = layer.asset;
             dstRect.layerId = layer.id;
@@ -69,6 +123,10 @@
                     p.k1 = CMP.evalAnim(fx.k1 != null ? fx.k1 : p.k1 || 0, mt.local);
                     p.ca = CMP.evalAnim(fx.ca != null ? fx.ca : p.ca || 0, mt.local);
                     p.W = W; p.H = H; p.aspect = W / H;
+                    if (lensP) {
+                        p.k1 = (p.k1 || 0) + lensP.k1;
+                        p.ca = (p.ca || 0) + lensP.ca;
+                    }
                     dstRect.lens = p;
                 } else if (fx.type === "grade") {
                     const preset = GRADE.GRADE_PRESETS[fx.preset || "viral_punch"];
@@ -86,19 +144,6 @@
         // static bars (§ export parity)
         if (comp.barTop > 0) ops.push({ op: "bars", band: "top", h: comp.barTop });
         if (comp.barBottom > 0) ops.push({ op: "bars", band: "bottom", h: comp.barBottom });
-
-        // fx layers (§15): flash + shake offsets are part of the frame state
-        let shake = { dx: 0, dy: 0 };
-        for (const layer of comp.layers) {
-            if (layer.type !== "fx") continue;
-            const st = evalFx(layer, t, fps);
-            if (!st) continue;
-            if (layer.kind === "flash") ops.push({ op: "flash", color: layer.color || "white", alpha: st });
-            if (layer.kind === "shake") {
-                shake.dx += (layer.amp || 12) * st * Math.sin(2 * Math.PI * (layer.freq || 7) * t);
-                shake.dy += (layer.amp || 12) * st * Math.cos(2 * Math.PI * (layer.freq || 7) * 9 / 7 * t);
-            }
-        }
 
         // text layers: cues with cue-local time (same engine as the monitor)
         const textCues = [];
@@ -135,12 +180,33 @@
             w: W, h: H, fps: fps, t: t, scale: opts.scale != null ? opts.scale : 1,
             ops: ops, textCues: textCues, shake: shake,
             grade: { on: gradeOn, lutN: o.lut ? o.lut.N : 0 },
+            zoom: zoom,
+            threshold: thresholdOn,
             vignette: comp.vignette != null ? comp.vignette : 0,
             gradeVignette: gradeVignette,
             flash: ops.some(o2 => o2.op === "flash")
         };
     }
 
+    /** §13.3 Lens Punch state at absolute time t. */
+    function lensPunchState(layer, t) {
+        const at = layer.in != null ? layer.in : layer.start;
+        const dur = ((layer.out != null ? layer.out : layer.end) - at) || 0.25;
+        const p = Math.max(0, Math.min(1, (t - at) / dur));
+        if (p <= 0) return { k1: 0, ca: 0 };
+        const bell = Math.exp(-Math.pow((p - 0.32) / 0.35, 2));
+        return { k1: (layer.amp != null ? layer.amp : 0.18) * bell,
+                 ca: (layer.peak != null ? layer.peak : 3) * bell };
+    }
+        /** §15 speed ramp integral: 0.35x (in) -> 1.8x (mid) -> 1x (out). */
+    function integrateRamp(local, dur) {
+        const half = Math.max(1e-3, dur / 2);
+        let acc = 0.35 * Math.min(local, half);
+        if (local > half) acc += (0.35 + 1.8) / 2 * Math.min(local - half, half);
+        if (local > dur) acc += (1.8 + 1.0) / 2 * Math.min(local - dur, dur);
+        if (local > dur * 1.5) acc += 1.0 * (local - dur * 1.5);
+        return acc;
+    }
     function aW_(asset) { return asset.w || 1; }
     function aH_(asset) { return asset.h || 1; }
 

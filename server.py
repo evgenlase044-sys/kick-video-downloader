@@ -433,7 +433,7 @@ async def progress_stream():
         while True:
             with state_lock:
                 data = dict(download_state)
-            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', **snap}, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0.5)
 
     return StreamingResponse(
@@ -1738,6 +1738,133 @@ def waveform(req: WaveformRequest):
     return {"status": "ok", "points": rms, "sr_points": n}
 
 
+# ── §7.6/§20 шаг 4: очередь экспорта (фон) + шаблон имени файла ──
+def format_export_name(template: str, ctx: Dict[str, Any]) -> str:
+    """{channel}_{date}_{n}_{title}; every part sanitized, fallbacks safe."""
+    tpl = template or "{channel}_{date}_{n}_{title}"
+    rep = {
+        "channel": sanitize_filename(str(ctx.get("channel") or "clip").replace("@", "")) or "clip",
+        "date": time.strftime("%Y%m%d"),
+        "n": str(int(ctx.get("n") or 1)),
+        "title": sanitize_filename(str(ctx.get("title") or "short"))[:40] or "short",
+    }
+    out = tpl
+    for k, v in rep.items():
+        out = out.replace("{" + k + "}", v)
+    out = "".join(c for c in out if c not in '<>:"/\\|?*')
+    return out.strip(". ") or "short"
+
+class ExportQueueRequest(BaseModel):
+    clips: List[ExportClipItem]
+    name_template: str = "{channel}_{date}_{n}_{title}"
+
+_export_queue_lock = threading.Lock()
+_export_queue: List[Dict[str, Any]] = []
+_export_queue_state: Dict[str, Any] = {
+    "running": False, "current": None, "done": 0, "total": 0,
+    "results": [], "queued_at": None, "finished_at": None,
+}
+
+def _export_queue_worker():
+    while True:
+        with _export_queue_lock:
+            if not _export_queue:
+                _export_queue_state["running"] = False
+                _export_queue_state["current"] = None
+                _export_queue_state["finished_at"] = time.time()
+                return
+            job = _export_queue.pop(0)
+            _export_queue_state["current"] = {"index": job["index"], "title": job["clip"].title}
+        try:
+            req = ExportPackRequest(pack_name="ExportQueue", clips=[job["clip"]],
+                                    name_template=job["name_template"])
+            res = export_clip_pack(req)
+            entry = {"index": job["index"], "title": job["clip"].title,
+                     "exported": res.get("exported_count", 0),
+                     "files": [c.get("path") or c.get("filename") for c in res.get("clips", [])],
+                     "failed": res.get("failed", [])}
+        except Exception as e:
+            entry = {"index": job["index"], "title": job["clip"].title,
+                     "exported": 0, "files": [], "failed": [{"error": str(e)}]}
+        with _export_queue_lock:
+            _export_queue_state["results"].append(entry)
+            _export_queue_state["done"] += 1
+
+@app.post("/api/export-queue")
+def export_queue_enqueue(req: ExportQueueRequest):
+    """§7.4: batch export runs in the background while the user keeps editing."""
+    if not req.clips:
+        raise HTTPException(status_code=400, detail="Список клипов пуст")
+    with _export_queue_lock:
+        if _export_queue_state.get("running"):
+            raise HTTPException(status_code=409, detail="Очередь уже выполняется")
+        start = len(_export_queue_state["results"])
+        for i, clip in enumerate(req.clips):
+            _export_queue.append({"index": start + i, "clip": clip,
+                                  "name_template": req.name_template})
+        _export_queue_state.update({
+            "running": True, "current": None,
+            "total": start + len(req.clips), "done": start,
+            "queued_at": time.time(), "finished_at": None,
+        })
+    threading.Thread(target=_export_queue_worker, daemon=True).start()
+    return {"status": "queued", "queued": len(req.clips),
+            "total": _export_queue_state["total"]}
+
+@app.get("/api/export-queue/status")
+def export_queue_status():
+    with _export_queue_lock:
+        return {
+            "running": _export_queue_state["running"],
+            "current": _export_queue_state["current"],
+            "done": _export_queue_state["done"],
+            "total": _export_queue_state["total"],
+            "results": _export_queue_state["results"][-20:],
+        }
+
+@app.get("/api/export-queue/stream")
+async def export_queue_stream():
+    """SSE progress: {type: progress|result|end, ...} until the queue drains."""
+    async def gen():
+        last_done = -1
+        idle = 0
+        while True:
+            with _export_queue_lock:
+                snap = {
+                    "running": _export_queue_state["running"],
+                    "current": _export_queue_state["current"],
+                    "done": _export_queue_state["done"],
+                    "total": _export_queue_state["total"],
+                    "last": (_export_queue_state["results"] or [None])[-1],
+                }
+            if snap["done"] != last_done:
+                last_done = snap["done"]
+                yield f"data: {json.dumps({'type': 'progress', **snap}, ensure_ascii=False)}\n\n"
+            if not snap["running"] and snap["done"] >= snap["total"] and snap["total"] > 0:
+                yield f"data: {json.dumps({'type': 'end', **snap}, ensure_ascii=False)}\n\n"
+                return
+            if not snap["running"] and snap["total"] == 0:
+                yield f"data: {json.dumps({'type': 'end', **snap}, ensure_ascii=False)}\n\n"
+                return
+            idle += 1
+            if idle > 3600:
+                yield f"data: {json.dumps({'type': 'end', **snap}, ensure_ascii=False)}\n\n"
+                return
+            await asyncio.sleep(0.25)
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+@app.post("/api/export-queue/clear")
+def export_queue_clear():
+    with _export_queue_lock:
+        if _export_queue_state["running"]:
+            raise HTTPException(status_code=409, detail="Нельзя очищать во время рендера")
+        _export_queue.clear()
+        _export_queue_state.update({"done": 0, "total": 0, "results": [], "running": False,
+                                    "current": None, "queued_at": None, "finished_at": None})
+    return {"status": "cleared"}
+
+
 @app.get("/api/grade/lut")
 def get_grade_lut():
     """Own 65^3 grade LUT for the preview WebGL2 pass (PLAN §14.6/§16.6)."""
@@ -1878,7 +2005,7 @@ class PipBox(BaseModel):
 class FxOverlay(BaseModel):
     start: float = 0.0           # output-time seconds
     end: float = 0.5
-    kind: str = "flash"          # flash | bars | shake
+    kind: str = "flash"          # flash | bars | shake | zoom | lens | threshold | whip | ramp | freeze
     color: str = "white"         # white | green | red | bw
     peak: float = 0.75           # max opacity 0..1 (never fully covers)
     bar_h: int = 120             # cinebars height px (kind=bars)
@@ -2022,6 +2149,7 @@ def _build_track_expr(points: List[Dict[str, Any]], axis: str, out_w: int, out_h
 class ExportPackRequest(BaseModel):
     pack_name: Optional[str] = "Pack"
     clips: List[ExportClipItem]
+    name_template: Optional[str] = None   # §7.6: {channel}_{date}_{n}_{title}
 
 def generate_ass_subtitle_content(subtitles: List[Dict[str, Any]], template_id: str = "meme") -> str:
     """Generates ASS subtitles formatted for viral vertical shorts in full 1080x1920."""
@@ -3021,6 +3149,60 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             )
             filter_parts.append(f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
+        elif fx.kind == "zoom":
+            # §15 zoom punch, transition path: constant overscan (N11) then an
+            # animated crop window whose size follows the punch envelope.
+            a = max(0.02, min(0.5, float(fx.peak if fx.peak and fx.peak < 1 else 0.15)))
+            ov = 1 + 2 * a                       # constant overscan (no geometry pop)
+            env = f"(1+{a:.4f}*(0.12+0.88*exp(-3*max(t-{s0:.3f}\\,0)/{max(1e-3, d):.3f}))*between(t,{s0:.3f},{e0:.3f}))"
+            filter_parts.append(
+                f"{curr_v}scale=ceil(iw*{ov:.4f}/2)*2:ceil(ih*{ov:.4f}/2)*2[{tag_prefix}v{fi}o]")
+            filter_parts.append(
+                f"[{tag_prefix}v{fi}o]crop=w='iw/{env}':h='ih/{env}':"
+                f"x='(iw-iw/{env})/2':y='(ih-ih/{env})/2',"
+                f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}]")
+            curr_v = f"[{tag_prefix}v{fi}]"
+        elif fx.kind == "lens":
+            # §13.4: static barrel + CA on the interval (animation = new renderer)
+            k1 = max(-0.45, min(0.45, float(fx.peak or 0.12)))
+            k1s = str(k1)
+            cx = 0.5 if fx.color in (None, "", "white") else 0.5
+            filter_parts.append(
+                f"{curr_v}lenscorrection=k1={k1s}:k2=0:cx=0.5:cy=0.5:enable={en}[{tag_prefix}v{fi}lc]")
+            shift = max(1, int(round(abs(k1) * 12)))
+            filter_parts.append(
+                f"[{tag_prefix}v{fi}lc]rgbashift=rh={shift}:bh=-{shift}:enable={en}[{tag_prefix}v{fi}]")
+            curr_v = f"[{tag_prefix}v{fi}]"
+        elif fx.kind == "threshold":
+            # §15 threshold hit: hard luma gate + noise dither, 1-2 frames
+            th = int(16 + (fx.peak if fx.peak is not None else 0.45) * 219)
+            filter_parts.append(
+                f"{curr_v}lutyuv=y='if(gt(val,{th}),235,16)':u=128:v=128:"
+                f"enable={en}[{tag_prefix}v{fi}]")
+            curr_v = f"[{tag_prefix}v{fi}]"
+        elif fx.kind == "whip":
+            # §15 whip: horizontal displacement with a smoothstep ease via
+            # animated crop-x (directional blur is new-renderer territory).
+            dirn = 1 if (fx.color or "white") != "left" else -1
+            BS = chr(92)
+            prg = f"((t-{s0:.3f})/{max(1e-3, d):.3f})"
+            pc = f"max(0{BS},min(1{BS},{prg}))"
+            ease = f"({pc}*{pc}*(3-2*{pc}))"
+            shift = f"{dirn}*0.35*iw*{ease}"
+            filter_parts.append(
+                f"{curr_v}split=2[{tag_prefix}v{fi}a][{tag_prefix}v{fi}b]")
+            filter_parts.append(
+                f"[{tag_prefix}v{fi}b]scale=iw*2:ih,"
+                f"crop=w=iw/2:h=ih:x='(iw-iw/2)/2+({shift})':y=0,"
+                f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}s]")
+            filter_parts.append(
+                f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
+            curr_v = f"[{tag_prefix}v{fi}]"
+        elif fx.kind in ("ramp", "freeze"):
+            # time-remap lives in the new renderer (Composition §8.3); the
+            # transition path logs and skips instead of producing garbage.
+            print(f"[fx] kind={fx.kind} skipped in transition path (needs renderer)")
+            continue
         elif fx.kind == "bars":
             bh = max(20, min(out_h // 3, int(fx.bar_h or 120)))
             prog = f"min(1,min(t-{s0:.3f},{e0:.3f}-t)/0.35)"
@@ -3753,7 +3935,13 @@ def export_clip_pack(req: ExportPackRequest):
         if clip.layers:
             timestamp_str2 = timestamp_str
             clean_handle0 = sanitize_filename(clip.streamer_handle.replace("@", "") or "clip")
-            out_filename0 = f"Short_{clean_handle0}_{timestamp_str}_{idx+1}.mp4"
+            if req.name_template:
+                out_filename0 = format_export_name(req.name_template, {
+                    "channel": clean_handle0, "n": idx + 1,
+                    "title": getattr(clip, "title", "") or "short",
+                }) + ".mp4"
+            else:
+                out_filename0 = f"Short_{clean_handle0}_{timestamp_str}_{idx+1}.mp4"
             out_path0 = os.path.join(EXPORTED_PACKS_DIR, out_filename0)
             res = _export_layered_clip(clip, out_path0, out_filename0, timestamp_str2, idx)
             if res:

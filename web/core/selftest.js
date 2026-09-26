@@ -479,5 +479,36 @@ function hsv2rgb(hsv) {
     }
 }
 
+// ── шаг 4: композерные fx §7.3 (zoom/lens/threshold/whip/ramp/freeze) ───
+section("шаг 4: fx композера §15 + time-remap (§7.3/§8.3)");
+{
+    const COMP = require("./render/composer.js");
+    const comp = {
+        version: 3, canvas: { w: 1080, h: 1920, fps: 60, bg: "#000" }, duration: 2,
+        assets: { src: { path: "x.mp4", w: 1280, h: 720, fps: 60 } },
+        layers: [
+            { id: "bg", type: "video", asset: "src", z: 0, time: { in: 0, out: 2, srcIn: 0 },
+              crop: { space: "source", x: 0, y: 0, w: 1, h: 1 } },
+            { id: "fxz", type: "fx", kind: "zoom", in: 0.2, out: 0.55, amp: 0.15 },
+            { id: "fxt", type: "fx", kind: "threshold", in: 1.0, out: 1.02 },
+            { id: "fxf", type: "fx", kind: "freeze", in: 1.4, out: 1.8 },
+            { id: "fxr", type: "fx", kind: "ramp", in: 0.6, out: 1.2 }
+        ]
+    };
+    const f21 = COMP.renderFrame(comp, 21, {});
+    check(f21.zoom.scale > 1.05 && f21.zoom.scale < 1.2, "zoom punch: scale > 1 inside the window",
+          f21.zoom.scale.toFixed(4));
+    check(COMP.renderFrame(comp, 6, {}).zoom.scale === 1, "zoom scale = 1 outside the window");
+    check(COMP.renderFrame(comp, 60.6, {}).threshold === true, "threshold hit active in its window");
+    check(COMP.renderFrame(comp, 30, {}).threshold === false, "threshold inactive outside");
+    const s14 = COMP.renderFrame(comp, 84, {}).ops[0].srcT;
+    const s16 = COMP.renderFrame(comp, 96, {}).ops[0].srcT;
+    check(s14 === s16, "freeze holds the source time", s14.toFixed(3) + " vs " + s16.toFixed(3));
+    const s09 = COMP.renderFrame(comp, 54, {}).ops[0].srcT;
+    check(s09 < 0.9 && s09 > 0.5, "ramp re-times the source (0.35x..1.8x)", s09.toFixed(3));
+    const s03 = COMP.renderFrame(comp, 18, {}).ops[0].srcT;
+    check(Math.abs(s03 - 0.3) < 1e-9, "outside fx windows the timeline is untouched");
+}
+
 console.log("\n" + (failures ? "SELFTEST FAILED: " + failures : "ALL CORE SELFTESTS PASSED"));
 process.exit(failures ? 1 : 0);

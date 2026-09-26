@@ -704,6 +704,97 @@ def test_step3():
     return ok
 
 
+# ─────────────────────────────────── §7.6 step 4: hotkeys, queue, naming ──
+def test_step4():
+    section("§7.6  Шаг 4 — хоткеи Z/L/B/W/R/E, очередь экспорта (SSE), шаблон имени")
+    ok = True
+    ed = read(os.path.join(BASE, "web", "editor.js"))
+    # §7.6: все хоткеи §7.3 присутствуют и ставят эффект в плейхед
+    for key, kind, sfx in [("KeyZ", "zoom", "whoosh_cinematic"), ("KeyL", "lens", "whoosh_magic"),
+                           ("KeyB", "threshold", "hit_small"), ("KeyW", "whip", "whoosh_fast"),
+                           ("KeyR", "ramp", "riser"), ("KeyE", "freeze", "camera_click")]:
+        ok &= check((key in ed) and (f'addEffectAtPlayhead("{kind}"' in ed),
+                    f"хоткей {key} -> эффект «{kind}» в плейхеде")
+        ok &= check(sfx in ed, f"дефолтный SFX для {key}: {sfx}")
+    ok &= check("snapToCut" in ed and "nearestCutTo" in ed,
+                "W (whip) ставится на ближайший рез (§7.3)")
+    ok &= check("exportQueueBtn" in ed and "/api/export-queue" in ed and
+                "EventSource" in ed, "очередь экспорта в UI с SSE-прогрессом (§7.4)")
+
+    # e2e: очередь + шаблон имени + переходные fx (zoom/lens/threshold/whip) в графе
+    import server
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    _make_src()
+    clip = {
+        "id": "rg_q", "title": "Q: тест", "source_file": "_vt_test_src.mp4",
+        "start_time": 0, "end_time": 1.5,
+        "format": "fullscreen", "color_grade": "tv",
+        "layers": [{"source_file": "_vt_test_src.mp4", "src_offset": 0, "duration": 1.5,
+                    "out_start": 0, "opacity": 1, "volume": 1, "muted": False, "z": 0}],
+        "overlays": [
+            {"kind": "zoom", "start": 0.2, "end": 0.5, "peak": 0.15, "z": 0},
+            {"kind": "lens", "start": 0.5, "end": 0.75, "peak": 0.12, "z": 0},
+            {"kind": "threshold", "start": 0.75, "end": 0.82, "z": 0},
+            {"kind": "whip", "start": 0.9, "end": 1.02, "z": 0},
+        ],
+        "subs_in_output_time": True, "subtitle_mode": "none",
+        "hot_words": False, "streamer_handle": "@vt", "subtitle_template": "acid",
+    }
+    client.post("/api/export-queue/clear")   # drop state from earlier runs
+    r = client.post("/api/export-queue", json={
+        "clips": [clip], "name_template": "{channel}_{date}_{n}_{title}"})
+    ok &= check(r.status_code == 200, "queue accepted the clip", r.text[:200])
+    if r.status_code != 200:
+        return ok
+
+    # SSE: read events until end (queue renders in a background thread)
+    saw_progress = saw_end = False
+    final_files = []
+    with client.stream("GET", "/api/export-queue/stream") as resp:
+        ok &= check(resp.headers.get("content-type", "").startswith("text/event-stream"),
+                    "SSE endpoint streams text/event-stream")
+        for line in resp.iter_lines():
+            if not line.startswith("data:"):
+                continue
+            m = json.loads(line[5:].strip())
+            if m.get("type") == "progress":
+                saw_progress = True
+            if m.get("type") == "end":
+                saw_end = True
+                break
+    # the SSE events carry only the last entry; fetch the full results
+    st = client.get("/api/export-queue/status").json()
+    for res in st.get("results", []):
+        final_files.extend(res.get("files", []))
+        for fail in res.get("failed", []):
+            print("        queue failure detail:", str(fail.get("error", ""))[:200])
+    ok &= check(saw_progress and saw_end, "SSE progress + end events received",
+                f"progress={saw_progress} end={saw_end}")
+    ok &= check(len(final_files) == 1 and os.path.exists(final_files[0]),
+                "queued export produced a file", str(final_files))
+
+    if final_files and os.path.exists(final_files[0]):
+        base = os.path.basename(final_files[0])
+        ok &= check(base.startswith("vt_") and "_1_" in base and base.endswith(".mp4"),
+                    "name template {channel}_{date}_{n}_{title} applied", base)
+        pr = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                             "format=duration", "-of", "csv=p=0", final_files[0]],
+                            capture_output=True, text=True)
+        try:
+            dur = float(pr.stdout.strip())
+            ok &= check(abs(dur - 1.5) < 0.15, "queued export duration correct", str(dur))
+        except ValueError:
+            ok &= check(False, "duration readable", pr.stdout[:80])
+        try:
+            os.remove(final_files[0])
+        except Exception:
+            pass
+    # очередь очищается для повторных прогонов
+    client.post("/api/export-queue/clear")
+    return ok
+
+
 class _MockGroq(BaseHTTPRequestHandler):
 
     behavior = {"fail_429": 0, "requests": []}
@@ -846,6 +937,7 @@ def main():
     ok &= test_p1()
     ok &= test_ws_render()
     ok &= test_step3()
+    ok &= test_step4()
     dt = time.time() - t0
     print(f"\n{'=' * 64}")
     if FAILURES:
