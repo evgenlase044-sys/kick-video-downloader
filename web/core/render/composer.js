@@ -15,6 +15,8 @@
     const GEO = (typeof CoreGeometry !== "undefined") ? CoreGeometry : require("../geometry.js");
     const CMP = (typeof CoreComposition !== "undefined") ? CoreComposition : require("../composition.js");
     const LUT = (typeof CoreLut3D !== "undefined") ? CoreLut3D : require("../lut3d.js");
+    const LENS = (typeof CoreLens !== "undefined") ? CoreLens : require("./lens.js");
+    const GRADE = (typeof CoreGrade !== "undefined") ? CoreGrade : require("./grade.js");
 
     /**
      * renderFrame(comp, f, scale) -> draw list.
@@ -57,6 +59,27 @@
                            w: srcRect.sw / aW_(asset), h: srcRect.sh / aH_(asset) };
             dstRect.dn = { x: dstRect.dx / W, y: dstRect.dy / H,
                            w: dstRect.dw / W, h: dstRect.dh / H };
+            // §13/§14 per-layer effects: lens params + grade preset params
+            const effects = layer.effects || [];
+            for (const fx of effects) {
+                if (fx.type === "lens") {
+                    const preset = LENS.LENS_PRESETS[fx.preset] || {};
+                    const p = Object.assign({}, preset, fx.params || {});
+                    // §8.2: animatable k1/ca resolve through evalAnim
+                    p.k1 = CMP.evalAnim(fx.k1 != null ? fx.k1 : p.k1 || 0, mt.local);
+                    p.ca = CMP.evalAnim(fx.ca != null ? fx.ca : p.ca || 0, mt.local);
+                    p.W = W; p.H = H; p.aspect = W / H;
+                    dstRect.lens = p;
+                } else if (fx.type === "grade") {
+                    const preset = GRADE.GRADE_PRESETS[fx.preset || "viral_punch"];
+                    if (preset) {
+                        dstRect.grade = GRADE.presetStrength(fx.preset || "viral_punch",
+                                                             fx.strength != null ? fx.strength : 1);
+                    } else if (fx.params) {
+                        dstRect.grade = fx.params;
+                    }
+                }
+            }
             ops.push(dstRect);
         }
 
@@ -97,12 +120,23 @@
 
         const gradeOn = comp.layers.some(l => l.type === "video" &&
             l.effects && l.effects.some(e => e.type === "grade" && e.on !== false));
+        let gradeVignette = 0;
+        for (const l of comp.layers) {
+            if (l.type !== "video" || !l.effects) continue;
+            for (const e of l.effects) {
+                if (e.type === "grade") {
+                    const preset = GRADE.GRADE_PRESETS[e.preset || "viral_punch"];
+                    if (preset && preset.vignette) gradeVignette = Math.max(gradeVignette, preset.vignette);
+                }
+            }
+        }
 
         return {
             w: W, h: H, fps: fps, t: t, scale: opts.scale != null ? opts.scale : 1,
             ops: ops, textCues: textCues, shake: shake,
             grade: { on: gradeOn, lutN: o.lut ? o.lut.N : 0 },
             vignette: comp.vignette != null ? comp.vignette : 0,
+            gradeVignette: gradeVignette,
             flash: ops.some(o2 => o2.op === "flash")
         };
     }
@@ -153,7 +187,19 @@
             if (u2 >= op.dn.x && u2 <= op.dn.x + op.dn.w && v2 >= op.dn.y && v2 <= op.dn.y + op.dn.h) {
                 const su = (op.sn.x + (u2 - op.dn.x) / op.dn.w * op.sn.w);
                 const sv = (op.sn.y + (v2 - op.dn.y) / op.dn.h * op.sn.h);
-                color = o.sourcePixel(op.asset, su, sv, frame.t);
+                if (op.lens) {
+                    // §13: distortion + CA per channel, then grade
+                    color = LENS.sampleColor(
+                        (lu, lv) => o.sourcePixel(op.asset, lu, lv, frame.t),
+                        su, sv, op.lens, frame.t);
+                } else {
+                    color = o.sourcePixel(op.asset, su, sv, frame.t);
+                }
+                if (op.grade) {
+                    color = GRADE.gradeColor(color, op.grade, o.lut || null);
+                } else if (o.lut) {
+                    color = LUT.sample(o.lut, color[0], color[1], color[2]);
+                }
                 break;
             }
         }
@@ -163,10 +209,13 @@
             const g = LUT.sample(o.lut, c[0], c[1], c[2]);
             c = g;
         }
-        if (frame.vignette) {
-            const dx = (u - 0.5) * 2, dy = (v - 0.5) * 2;
-            const r2 = Math.min(1, dx * dx + dy * dy);
-            const k = 1 - frame.vignette * Math.pow(r2, 0.8);
+        let vig = frame.vignette;
+        if (!vig && frame.gradeVignette) vig = frame.gradeVignette;
+        if (vig) {
+            // §14.4: 1 - amount * r^1.6 (corner-normalized radius)
+            const dxn = (u - 0.5) * 2, dyn = (v - 0.5) * 2;
+            const r = Math.min(1, Math.hypot(dxn, dyn) / Math.hypot(1, 1));
+            const k = 1 - vig * Math.pow(r, 1.6);
             c = [c[0] * k, c[1] * k, c[2] * k];
         }
         for (const op of frame.ops) {

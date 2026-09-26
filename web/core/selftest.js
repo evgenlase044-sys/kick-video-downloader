@@ -318,5 +318,166 @@ section("шаг 2 golden: SDF/Kawase/motion blur/эффекты §15 (§7.5)");
     check(raw.length === wT * hT * 3 / 2, "raw frame = w*h*1.5 bytes (WS protocol)");
 }
 
+// ── шаг 3: Lens & Detail §13 + GPU-грейд §14 (гейты §7.5) ───────────────
+section("шаг 3 lens & grade: k1=0 бит-в-бит, overscan, Viral Punch (§7.5)");
+{
+    const LENS = require("./render/lens.js");
+    const GRADE = require("./render/grade.js");
+    const COMP = require("./render/composer.js");
+    const LUT = require("./lut3d.js");
+    const fs3 = require("fs");
+    const path3 = require("path");
+    const lut = LUT.parseCube(fs3.readFileSync(path3.join(__dirname, "..", "..", "tv_grade.cube"), "utf8"));
+
+    function makeComp(lensEffects) {
+        return {
+            version: 3, canvas: { w: 1080, h: 1920, fps: 60, bg: "#000" }, duration: 2,
+            assets: { src: { path: "x.mp4", w: 1280, h: 720, fps: 60 } },
+            layers: [{
+                id: "bg", type: "video", asset: "src", z: 0,
+                time: { in: 0, out: 2, srcIn: 0 },
+                crop: { space: "source", x: 0, y: 0, w: 1, h: 1 },
+                effects: lensEffects
+            }]
+        };
+    }
+    const srcFn = (a, u, v, t) => [0.3 + 0.4 * u, 0.3 + 0.4 * v, 0.5];
+    const noLens = makeComp([{ type: "grade", preset: "viral_punch" }]);
+    const zeroLens = makeComp([{ type: "lens", k1: 0, ca: 0 }, { type: "grade", preset: "viral_punch" }]);
+    // §7.5 gate: при k1 = 0 кадр бит-в-бит равен входу (после грейда)
+    let maxDiff = 0;
+    for (let i = 0; i < 20; i++) {
+        const u = (i * 37 % 100) / 100, v = (i * 61 % 100) / 100;
+        const a = COMP.pixelAt(noLens, 30, u, v, { lut: lut, sourcePixel: srcFn });
+        const b = COMP.pixelAt(zeroLens, 30, u, v, { lut: lut, sourcePixel: srcFn });
+        for (let ch = 0; ch < 3; ch++) maxDiff = Math.max(maxDiff, Math.abs(a[ch] - b[ch]));
+    }
+    check(maxDiff === 0, "k1=0: бит-в-бит равен входу (zero-lens == no-lens)", maxDiff.toExponential(2));
+
+    // §7.5 gate: при k1 > 0 углы не показывают пустоту (auto-overscan)
+    const k1comp = makeComp([{ type: "lens", k1: 0.18, ca: 3 }, { type: "grade", preset: "viral_punch" }]);
+    let cornersInside = true, sampled = 0;
+    for (const [cu, cv] of [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]) {
+        const m = LENS.mapPoint(cu, cv, { k1: 0.18, aspect: 1080 / 1920, W: 1080, H: 1920 });
+        const okUV = m.g.u >= -1e-9 && m.g.u <= 1 + 1e-9 && m.g.v >= -1e-9 && m.g.v <= 1 + 1e-9;
+        sampled++;
+        if (!okUV) cornersInside = false;
+        // the composed pipeline must still produce a real color at the corner
+        const px = COMP.pixelAt(k1comp, 30, Math.min(0.999, cu), Math.min(0.999, cv),
+                                { lut: lut, sourcePixel: srcFn });
+        if (!px.every(x => isFinite(x))) cornersInside = false;
+    }
+    check(cornersInside, "auto-overscan: при k1>0 углы остаются в кадре", "corners=" + sampled);
+
+    // симметрия линзы: прямые линии гнутся симметрично относительно центра
+    const mL = LENS.lensMap(0.3, 0.5, { k1: 0.18, aspect: 1080 / 1920, W: 1080, H: 1920 });
+    const mR = LENS.lensMap(0.7, 0.5, { k1: 0.18, aspect: 1080 / 1920, W: 1080, H: 1920 });
+    const dL = Math.abs(mL.u - 0.5), dR = Math.abs(0.5 - mR.u);
+    check(Math.abs(dL - dR) < 1e-9, "lens bends symmetrically around the center", (dL - dR).toExponential(1));
+
+    // Lens Punch §13.3: k1 пик ~0.18 @80 мс, ноль на границах
+    const punch = LENS.lensPunch;
+    check(punch(0).k1 === 0 && punch(1.0).k1 < 0.02, "Lens Punch starts and ends at zero");
+    let pk = 0, pkT = 0;
+    for (let i = 0; i <= 300; i++) {
+        const v = punch(i / 1000).k1;
+        if (v > pk) { pk = v; pkT = i / 1000; }
+    }
+    check(pk > 0.15 && pk <= 0.181 && Math.abs(pkT - 0.08) < 0.05,
+          "Lens Punch k1 peaks ~0.18 near 80 ms", "peak=" + pk.toFixed(3) + " @" + (pkT * 1000).toFixed(0) + "ms");
+
+    // Bulge/Fisheye/Wave/Twirl: центр неизменен, fov=0 identity
+    const c0 = LENS.bulgeMap(0.5, 0.5, { amount: 0.35, R: 0.25 });
+    check(Math.abs(c0.u - 0.5) < 1e-12 && Math.abs(c0.v - 0.5) < 1e-12, "bulge center invariant");
+    const f0 = LENS.fisheyeMap(0.42, 0.61, { fov: 0 });
+    check(f0.u === 0.42 && f0.v === 0.61, "fisheye fov=0 identity");
+    const w0 = LENS.waveMap(0.3, 0.5, { A: 0 }, 1.0);
+    check(w0.u === 0.3, "wave A=0 identity");
+    const tw = LENS.twirlMap(0.5, 0.5, { twirl: 1.2, R: 0.4 });
+    check(Math.abs(tw.u - 0.5) < 1e-12, "twirl center invariant");
+
+    // §7.5 gate: Viral Punch на разбросе цветов — клиппинг < 0.5%, кожа ±10°
+    let clip = 0, total = 0, skinBad = 0, skinTotal = 0;
+    let seed = 12345;
+    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+    for (let i = 0; i < 10000; i++) {
+        let rgb;
+        if (i % 5 === 0) {
+            // skin-tone samples: plausible exposure (up to 0.85; brighter is
+            // specular convergence where hue is undefined) around hue 0.07
+            const h = 0.07 + (rnd() - 0.5) * 0.03, s = 0.25 + rnd() * 0.3, vv = 0.45 + rnd() * 0.40;
+            rgb = hsv2rgb([h, s, vv]);
+            skinTotal++;
+        } else {
+            // camera-like content: luma-centered, limited saturation
+            const base = 0.25 + rnd() * 0.65;
+            const chroma = Math.pow(rnd(), 2) * 0.35;
+            rgb = [
+                Math.max(0, Math.min(1, base + (rnd() - 0.5) * chroma)),
+                Math.max(0, Math.min(1, base + (rnd() - 0.5) * chroma)),
+                Math.max(0, Math.min(1, base + (rnd() - 0.5) * chroma))
+            ];
+        }
+        const out = GRADE.gradeColor(rgb, GRADE.GRADE_PRESETS.viral_punch, lut);
+        for (let ch = 0; ch < 3; ch++) {
+            total++;
+            if (out[ch] >= 0.9995 || out[ch] <= 0.0005) clip++;
+        }
+        if (i % 5 === 0) {
+            const hsvOut = GRADE.rgb2hsv(out);
+            if (hsvOut[1] > 0.1) {           // hue is only meaningful on chromatic pixels
+                const hIn = GRADE.rgb2hsv(rgb)[0];
+                const dh = Math.abs(Math.abs(hsvOut[0] - hIn + 0.5) % 1 - 0.5) * 360;
+                if (dh > 10) skinBad++;
+            }
+        }
+    }
+    check(clip / total < 0.005, "Viral Punch clipping < 0.5% of channels",
+          (100 * clip / total).toFixed(3) + "%");
+    check(skinBad === 0, "skin hue within ±10 degrees on all skin samples",
+          skinBad + "/" + skinTotal + " off");
+
+    // "Выровнять" §14.3: expo из p50, клампы ±1
+    const al = GRADE.autoLevels({ p1: 0.05, p50: 0.2, p99: 0.9, chanMeans: [0.24, 0.2, 0.2] });
+    check(Math.abs(al.expo - Math.log2(0.40 / 0.2)) < 1e-9, "autoLevels expo = log2(0.40/p50)", al.expo.toFixed(3));
+    check(GRADE.autoLevels({ p1: 0.05, p50: 0.1, p99: 0.9 }).expo === 1, "autoLevels expo clamped +1");
+    // strength slider: 0 -> identity, 1 -> full preset
+    const s0 = GRADE.presetStrength("viral_punch", 0);
+    check(Math.abs(s0.contrast - 1) < 1e-9 && Math.abs(s0.sat - 1) < 1e-9 && s0.offset[0] === 0,
+          "strength 0 = identity params");
+    const s1 = GRADE.presetStrength("viral_punch", 1);
+    check(Math.abs(s1.contrast - GRADE.GRADE_PRESETS.viral_punch.contrast) < 1e-9, "strength 1 = full preset");
+    // presets complete per §14.5
+    for (const name of ["viral_punch", "teal_orange", "night_neon", "clean_natural",
+                        "moody_film", "bw_contrast", "tv_acid"]) {
+        check(!!GRADE.GRADE_PRESETS[name], "preset §14.5: " + name);
+    }
+    for (const name of ["lens_punch", "fisheye_hold", "bulge_face", "crispy", "heat_wobble", "crispy_lens"]) {
+        check(!!LENS.LENS_PRESETS[name], "lens preset §13.3: " + name);
+    }
+    // detail §13.1: edge contrast grows with a1
+    const Wd = 32, Hd = 8, edge = new Float32Array(Wd * Hd);
+    for (let x = 0; x < Wd; x++) for (let y = 0; y < Hd; y++) edge[y * Wd + x] = x < 16 ? 0.35 : 0.65;
+    const sharp = LENS.applyDetail(edge, Wd, Hd, { a1: 1.2, sigma: 1.0 });
+    const ry = 4;
+    const contrast0 = edge[ry * Wd + 16] - edge[ry * Wd + 15];
+    const contrast1 = sharp[ry * Wd + 16] - sharp[ry * Wd + 15];
+    check(contrast1 > contrast0, "Detail increases edge contrast (MTF50 up)",
+          contrast0.toFixed(3) + " -> " + contrast1.toFixed(3));
+}
+function hsv2rgb(hsv) {
+    const h = hsv[0], s = hsv[1], v = hsv[2];
+    const i = Math.floor(h * 6), f = h * 6 - i;
+    const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+        case 0: return [v, t, p];
+        case 1: return [q, v, p];
+        case 2: return [p, v, t];
+        case 3: return [p, q, v];
+        case 4: return [t, p, v];
+        default: return [v, p, q];
+    }
+}
+
 console.log("\n" + (failures ? "SELFTEST FAILED: " + failures : "ALL CORE SELFTESTS PASSED"));
 process.exit(failures ? 1 : 0);

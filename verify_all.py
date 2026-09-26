@@ -668,6 +668,42 @@ def test_ws_render():
     return ok
 
 
+# ───────────────────────────── §7.5 step 3: Lens & Detail + grade §13/§14 ──
+def test_step3():
+    section("§7.5  Шаг 3 — Lens & Detail §13, GPU-грейд §14 (автоматизируемые гейты)")
+    ok = True
+    r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
+                       capture_output=True, text=True, timeout=120, cwd=BASE)
+    ok &= check(r.returncode == 0, "selftest incl. шаг 3 (lens/grade)",
+                (r.stdout[-400:] + r.stderr[-200:]) if r.returncode else "")
+    ok &= check("шаг 3 lens & grade" in r.stdout, "step-3 section present")
+    for gate in ("k1=0: бит-в-бит равен входу",
+                 "auto-overscan: при k1>0 углы остаются в кадре",
+                 "Viral Punch clipping < 0.5% of channels",
+                 "skin hue within ±10 degrees on all skin samples",
+                 "Lens Punch k1 peaks ~0.18 near 80 ms",
+                 "Detail increases edge contrast (MTF50 up)"):
+        ok &= check(gate in r.stdout, "gate §7.5: " + gate)
+
+    lens = read(os.path.join(BASE, "web", "core", "render", "lens.js"))
+    grade = read(os.path.join(BASE, "web", "core", "render", "grade.js"))
+    composer = read(os.path.join(BASE, "web", "core", "render", "composer.js"))
+    html = read(os.path.join(BASE, "web", "index.html"))
+    for preset in ("lens_punch", "fisheye_hold", "bulge_face", "crispy", "heat_wobble", "crispy_lens"):
+        ok &= check(preset in lens, "lens preset §13.3: " + preset)
+    for preset in ("viral_punch", "teal_orange", "night_neon", "clean_natural",
+                   "moody_film", "bw_contrast", "tv_acid"):
+        ok &= check(preset in grade, "grade preset §14.5: " + preset)
+    ok &= check("autoLevels" in grade and "log2(0.40" in grade,
+                "§14.3 «Выровнять»: expo = clamp(log2(0.40/p50))")
+    ok &= check("mapPoint" in lens and "LENS_GLSL" in lens, "lens: JS-ядро + GLSL-зеркало")
+    ok &= check("op.lens" in composer and "gradeColor" in composer,
+                "composer carries lens params and grade params into the pixel pipeline")
+    ok &= check("core/render/lens.js" in html and "core/render/grade.js" in html,
+                "lens/grade modules loaded before composer in index.html")
+    return ok
+
+
 class _MockGroq(BaseHTTPRequestHandler):
 
     behavior = {"fail_429": 0, "requests": []}
@@ -809,6 +845,7 @@ def main():
     ok &= test_p0()
     ok &= test_p1()
     ok &= test_ws_render()
+    ok &= test_step3()
     dt = time.time() - t0
     print(f"\n{'=' * 64}")
     if FAILURES:
