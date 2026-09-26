@@ -73,4 +73,21 @@ C:\Users\artba\OneDrive\Desktop\job\
 ## Требования окружения
 - **Python**: 3.10+ (протестировано на Python 3.14)
 - **FFmpeg**: установлен и доступен в системном `PATH` (установлен в системе).
-- **Пакеты**: `fastapi`, `uvicorn`, `rich` (уже установлены в системе).
+- **Пакеты**: устанавливаются из `requirements.txt`:
+  ```cmd
+  pip install -r requirements.txt
+  ```
+  Состав: `fastapi`, `uvicorn`, `pydantic`, `python-multipart`, `requests`, `rich`, `fontTools`, `opencv-python`, `numpy`.
+
+---
+
+## Лицензии
+- Код проекта — **MIT** (см. `LICENSE`).
+- Шрифты в `fonts/` — Google Fonts под **SIL OFL 1.1**, метаданные в `fonts/LICENSES/`.
+- Звуки в `sfx/` — **CC0 1.0**, сгенерированы процедурно (`tools/gen_sfx.py`), см. `sfx/CREDITS.md`.
+- Цветовой LUT `tv_grade.cube` — собственный пресет проекта (`tools/gen_tv_lut.py`).
+- Полный список зависимостей и ассетов — `THIRD_PARTY_NOTICES.md`.
+
+## Субтитры и приватность (Groq)
+Субтитры распознаются **только облачным API Groq** (`whisper-large-v3-turbo` / `whisper-large-v3`) с вашим личным ключом `GROQ_API_KEY` (`.env` или настройки; в репозитории ключ не хранится). Локальные модели распознавания не используются. Аудио отправляется в Groq **только** когда вы нажимаете «Субтитры», и только для выбранного фрагмента. Без ключа ручной текст работает как прежде.
+

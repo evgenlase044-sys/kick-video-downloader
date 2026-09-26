@@ -1,0 +1,20 @@
+Font family: Marck Script
+Bundled file: fonts/marckscript-MarckScript-Regular.ttf
+Source: Google Fonts (https://fonts.google.com)
+License: SIL Open Font License 1.1
+License URL: https://openfontlicense.org
+
+Copyright (c) 2011, Denis Masharov <denis.masharov@gmail.com>, Marck Fogel, with Reserved Font Names "Marck Script".
+
+Designer: Denis Masharov, Marck Fogel
+
+Manufacturer: Denis Masharov
+
+License record embedded in the font:
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
+
+License URL (embedded): http://scripts.sil.org/OFL
+
+This font is bundled with Kick Clip Studio under the terms above.
+OFL 1.1 permits bundling and redistribution; sellling the font on its own
+and using Reserved Font Names for modified versions is not allowed.

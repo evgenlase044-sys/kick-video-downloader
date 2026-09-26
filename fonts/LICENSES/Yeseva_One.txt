@@ -1,0 +1,20 @@
+Font family: Yeseva One
+Bundled file: fonts/yesevaone-YesevaOne-Regular.ttf
+Source: Google Fonts (https://fonts.google.com)
+License: SIL Open Font License 1.1
+License URL: https://openfontlicense.org
+
+Copyright 2012 The Yeseva One Project Authors (lemonad@jovanny.ru), with Reserved Font Name "Yeseva".
+
+Designer: Jovanny Lemonad
+
+Manufacturer: Jovanny Lemonad
+
+License record embedded in the font:
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
+
+License URL (embedded): http://scripts.sil.org/OFL
+
+This font is bundled with Kick Clip Studio under the terms above.
+OFL 1.1 permits bundling and redistribution; sellling the font on its own
+and using Reserved Font Names for modified versions is not allowed.

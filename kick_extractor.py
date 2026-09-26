@@ -220,13 +220,15 @@ class KickExtractor:
                     fps = 30
                     m_fps = re.search(r'FRAME-RATE=([0-9.]+)', inf_line)
                     if m_fps:
-                        fps = int(float(m_fps.group(1)))
+                        # N17: keep fractional fps (59.94 stays 59.94, not 59)
+                        fps = float(m_fps.group(1))
 
                     # Human-friendly label (e.g., 1080p60, 720p60, 480p)
                     label = res
                     if res:
                         h = res.split("x")[-1]
-                        label = f"{h}p{fps}" if fps > 30 else f"{h}p"
+                        fps_label = int(round(fps))
+                        label = f"{h}p{fps_label}" if fps_label > 30 else f"{h}p"
 
                     qualities.append({
                         "label": label,
@@ -249,6 +251,11 @@ class KickExtractor:
 
         # Sort qualities descending by resolution (1080p -> 720p -> 480p -> 360p -> 160p)
         qualities.sort(key=get_quality_rank, reverse=True)
+        # N17: mark the source quality = highest bitrate (usually first after sort)
+        if qualities:
+            best = max(qualities, key=lambda q: q.get("bandwidth", 0))
+            for q in qualities:
+                q["is_source"] = (q is best)
         return qualities
 
 if __name__ == "__main__":

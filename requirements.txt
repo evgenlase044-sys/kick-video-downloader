@@ -1,0 +1,11 @@
+# Kick Clip Studio — Python backend dependencies
+# Install: pip install -r requirements.txt
+fastapi==0.138.0
+uvicorn==0.49.0
+pydantic==2.13.4
+python-multipart==0.0.32
+requests==2.34.2
+rich==15.0.0
+fonttools==4.65.0
+opencv-python==5.0.0.93
+numpy==2.5.1

@@ -3,6 +3,7 @@ name = "splash_engine"
 version = "0.1.0"
 edition = "2021"
 description = "Frame-accurate short-video rendering engine (ishowsplash-style templates) in pure Rust + ffmpeg I/O"
+license = "MIT"
 
 [dependencies]
 ab_glyph = "0.2"

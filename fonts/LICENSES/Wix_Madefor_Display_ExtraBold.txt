@@ -1,0 +1,20 @@
+Font family: Wix Madefor Display ExtraBold
+Bundled file: fonts/wixmadefor-wixmadefor-extrabold.ttf
+Source: Google Fonts (https://fonts.google.com)
+License: SIL Open Font License 1.1
+License URL: https://openfontlicense.org
+
+Copyright 2021 The Wix Madefor Project Authors (https://github.com/wix/wixmadefor/)
+
+Designer: Dalton Maag Ltd
+
+Manufacturer: Dalton Maag Ltd
+
+License record embedded in the font:
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://scripts.sil.org/OFL
+
+License URL (embedded): https://scripts.sil.org/OFL
+
+This font is bundled with Kick Clip Studio under the terms above.
+OFL 1.1 permits bundling and redistribution; sellling the font on its own
+and using Reserved Font Names for modified versions is not allowed.

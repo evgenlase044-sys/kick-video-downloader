@@ -40,6 +40,8 @@
             flashCuts: true,           // белые вспышки между нарезками
             cropBox: null,              // область вебки {x,y,w,h} 0..1 (page-recording стримы)
             bgBox: null,                // область фона/геймплея {x,y,w,h} 0..1 (низ сплита)
+            hotWords: false,            // §12.6: длина-эвристика выкл. по умолчанию — акценты вручную
+            markers: [],                // §7.1: ручные маркеры во время просмотра VOD
             subtitles: [],              // list of segments with word timestamps
             pack: []                    // legacy, replaced by state.regions
         },
@@ -208,6 +210,24 @@
                 }
             } else if (e.code === "KeyV") {
                 setTool("select");
+            } else if (e.code === "KeyM") {
+                // §7.1: маркер в текущей точке (Shift+M — с заметкой)
+                addMarkerAtPlayhead(e.shiftKey);
+            } else if (e.code === "Enter") {
+                addRegionFromNearestMarker();
+            } else if (e.code === "KeyF") {
+                // §7.3: вспышка ровно в плейхеде (Shift+F — цвет по кругу)
+                const colors = ["white", "red", "green"];
+                if (state._fxColorIdx == null) state._fxColorIdx = 0;
+                const col = e.shiftKey ? colors[(state._fxColorIdx++) % colors.length] : "white";
+                addEffectAtPlayhead("flash", col, { duration: 0.18, peak: 0.95, fxSound: "impact_epic" });
+            } else if (e.code === "KeyX") {
+                // §7.3: шейк 14 px / 350 мс в плейхеде
+                addEffectAtPlayhead("shake", "white", { duration: 0.35, fxAmp: 14, fxSound: "whoosh_fast" });
+            } else if (e.code === "KeyP" && e.altKey) {
+                saveChannelPreset();
+            } else if (e.code === "KeyP") {
+                applyChannelPreset();
             } else if (e.code === "Delete" || e.code === "Backspace") {
                 if (state.selectedRegionId) {
                     deleteSelectedRegion();
@@ -2487,7 +2507,19 @@
     function renderRegionsLane() {
         const lane = ensureRegionLane();
         if (!lane) return;
-        lane.querySelectorAll(".region-block,.region-flash").forEach(el => el.remove());
+        lane.querySelectorAll(".region-block,.region-flash,.marker-tick").forEach(el => el.remove());
+        // §7.1: маркеры видны на обзорной полосе вместе с нарезками
+        (state.clipper.markers || []).forEach(m => {
+            const tick = document.createElement("div");
+            tick.className = "marker-tick" + (m.note ? " noted" : "");
+            tick.style.left = `${m.t * state.zoom}px`;
+            tick.title = `Маркер @ ${m.t.toFixed(2)}с${m.note ? " — " + m.note : ""}`;
+            tick.addEventListener("dblclick", (e) => {
+                e.stopPropagation();
+                seekTo(m.t);
+            });
+            lane.appendChild(tick);
+        });
         const regs = sortedRegions();
         const W = timelineContentWidth();
         lane.style.width = `${W}px`;
@@ -2943,7 +2975,20 @@
                 formatCards.forEach(c => c.classList.remove("active"));
                 card.classList.add("active");
                 state.clipper.format = card.dataset.format;
+                // H7: Shorts-формат немедленно переводит монитор в 9:16
+                const shortsFmt = state.clipper.format === "split_adhd" || state.clipper.format === "talking_head_9_16";
+                state.aspectRatio = shortsFmt ? "9:16" : "16:9";
+                const artBtn = document.getElementById("aspectRatioToggleBtn");
+                if (artBtn) {
+                    artBtn.textContent = state.aspectRatio;
+                    artBtn.classList.toggle("active-9-16", shortsFmt);
+                }
+                if (videoMonitor) videoMonitor.classList.toggle("vertical-9-16", shortsFmt);
                 updateClipperUI();
+                applyPreviewLook();
+                updateTvPreview();
+                updateLiveSubtitleOverlay();
+                syncVideoToCurrentTime();
                 if (window.__syncTvPresetUI) window.__syncTvPresetUI();
             });
         });
@@ -3343,7 +3388,9 @@
                 bg_box: state.clipper.bgBox || null,
                 bar_top: parseInt(state.clipper.barTop, 10) || 0,
                 bar_bottom: parseInt(state.clipper.barBottom, 10) || 0,
-                hot_words: state.clipper.hotWords !== false
+                hot_words: state.clipper.hotWords === true,
+                // H1: субтитры живут на таймлайне — единый источник правды
+                subtitle_mode: "timeline"
             };
             // верхний слой с текстом: FX на треках выше него прожигаются ПОВЕРХ текста
             const tz = trackOrder().findIndex(tid => (getTrack(tid) || {}).kind === "text");
@@ -4276,7 +4323,7 @@
             const v = document.getElementById("barBottomVal");
             if (v) v.textContent = `${barBottomSlider.value}px`;
         }
-        if (hotWordsCheck) hotWordsCheck.checked = state.clipper.hotWords !== false;
+        if (hotWordsCheck) hotWordsCheck.checked = state.clipper.hotWords === true;
         if (srcProcCheck) srcProcCheck.checked = !!state.clipper.srcProcessed;
         if (wordsSel) wordsSel.value = String(state.clipper.wordsPerCue || 3);
         if (langSel) langSel.value = state.clipper.subLang || "ru";
@@ -4906,6 +4953,137 @@
         saveProject();
         return tr.id;
     }
+    // ── §7.1: ручные маркеры во время просмотра VOD (M / Shift+M / Enter) ──
+    function addMarkerAtPlayhead(withNote) {
+        ensureTracksInitialized();
+        const t = Math.round(state.currentTime * 100) / 100;
+        const list = state.clipper.markers = state.clipper.markers || [];
+        const existing = list.find(m => Math.abs(m.t - t) < 0.25);
+        if (existing) {
+            showToast(`Маркер на ${t.toFixed(2)}с уже стоит.`, "info");
+            return;
+        }
+        const marker = { t, note: "" };
+        list.push(marker);
+        list.sort((a, b) => a.t - b.t);
+        const finish = () => {
+            renderRegionsLane();
+            saveProject();
+            showToast(`Маркер ${list.length} @ ${t.toFixed(2)}с поставлен (Enter — нарезка от ближайшего маркера).`, "ok");
+        };
+        if (withNote) {
+            showPrompt("Заметка к маркеру:", "").then(note => {
+                marker.note = (note || "").trim();
+                finish();
+            });
+        } else finish();
+    }
+    function addRegionFromNearestMarker() {
+        const list = state.clipper.markers || [];
+        if (!list.length) {
+            addRegionFromPlayhead();
+            return;
+        }
+        const before = [...list].reverse().find(m => m.t <= state.currentTime + 0.01);
+        const after = list.find(m => m.t > state.currentTime);
+        const m = before || after;
+        if (!m) { addRegionFromPlayhead(); return; }
+        seekTo(Math.max(0, m.t));
+        addRegionFromPlayhead();
+        showToast(`Нарезка от маркера @ ${m.t.toFixed(2)}с${m.note ? " — " + m.note : ""}.`, "ok");
+    }
+    // §7.3: «эффект в точке плейхеда» одной клавишей, с дефолтными параметрами
+    // и дефолтным SFX. Переходный путь поддерживает flash / bars / shake (§15).
+    function addEffectAtPlayhead(kind, color, overrides) {
+        const before = (state.tracks[tidOfFx()] || []).length;
+        addFxClip(kind, color);
+        const tid = tidOfFx();
+        const clips = state.tracks[tid] || [];
+        if (clips.length === before) return;
+        const c = clips[clips.length - 1];
+        if (c && c.isFx && overrides) Object.assign(c, overrides);
+        renderTimeline();
+        saveProject();
+    }
+    function tidOfFx() {
+        const order = trackOrder();
+        for (const tid of order) {
+            const tr = getTrack(tid);
+            if (tr && tr.kind === "video") return tid;
+        }
+        return ensureFxTrack();
+    }
+    // ── §9.4: пресет канала — рамки/раскладка/стиль/словарь одним нажатием (P) ──
+    async function applyChannelPreset() {
+        const handle = (state.clipper.streamerHandle || "").replace("@", "").trim();
+        if (!handle) {
+            showToast("Укажи ник стримера в поле хэндла — пресеты хранятся по нику.", "info");
+            return;
+        }
+        try {
+            const res = await fetch(`/api/presets/channel/${encodeURIComponent(handle)}`);
+            if (!res.ok) {
+                showToast(`Пресет канала «${handle}» не найден — настрой рамки и сохрани (Alt+P).`, "info");
+                return;
+            }
+            const data = await res.json();
+            const p = data.preset || {};
+            if (p.crop_box) state.clipper.cropBox = p.crop_box;
+            if (p.bg_box) state.clipper.bgBox = p.bg_box;
+            if (p.format) state.clipper.format = p.format;
+            if (p.style_pack) {
+                if (p.style_pack.subtitle_template) state.clipper.subtitleTemplate = p.style_pack.subtitle_template;
+                if (p.style_pack.sub_font) state.clipper.subFont = p.style_pack.sub_font;
+                if (p.style_pack.sub_size) state.clipper.subSize = p.style_pack.sub_size;
+                if (p.style_pack.sub_glow != null) state.clipper.subGlow = p.style_pack.sub_glow;
+                if (p.style_pack.sub_anim) state.clipper.subAnim = p.style_pack.sub_anim;
+                if (p.style_pack.color_grade) state.clipper.colorGrade = p.style_pack.color_grade;
+            }
+            if (p.asr_prompt) state.clipper.asrPrompt = p.asr_prompt;
+            if (p.layout === "fullscreen" && !p.crop_box) state.clipper.cropBox = null;
+            updateClipperUI();
+            updateTvPreview();
+            updateLiveSubtitleOverlay();
+            syncVideoToCurrentTime();
+            saveProject();
+            showToast(`Пресет канала «${handle}» применён.`, "ok");
+        } catch (e) {
+            showToast("Ошибка загрузки пресета: " + e.message, "err");
+        }
+    }
+    async function saveChannelPreset() {
+        const handle = (state.clipper.streamerHandle || "").replace("@", "").trim();
+        if (!handle) {
+            showToast("Укажи ник стримера, под которым сохранить пресет.", "info");
+            return;
+        }
+        const preset = {
+            cam_box: state.clipper.cropBox || null,
+            content_box: state.clipper.bgBox || null,
+            format: state.clipper.format,
+            layout: state.clipper.cropBox ? "split" : "fullscreen",
+            style_pack: {
+                subtitle_template: state.clipper.subtitleTemplate,
+                sub_font: state.clipper.subFont,
+                sub_size: state.clipper.subSize,
+                sub_glow: state.clipper.subGlow,
+                sub_anim: state.clipper.subAnim,
+                color_grade: state.clipper.colorGrade
+            },
+            asr_prompt: state.clipper.asrPrompt || null
+        };
+        try {
+            const res = await fetch("/api/presets/channel", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ channel: handle, preset })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            showToast(`Пресет канала «${handle}» сохранён (Alt+P применяет к новым нарезкам).`, "ok");
+        } catch (e) {
+            showToast("Ошибка сохранения пресета: " + e.message, "err");
+        }
+    }
     function addFxClip(kind, color) {
         const tid = ensureFxTrack();
         ensureTracksInitialized();
@@ -5105,6 +5283,24 @@
     let trackDrawMode = false;
     let cropDrawMode = false;   // рисование области вебки для TV-шаблонов
     let trackingBox = null; // {x,y,w,h} normalized
+    // §10.5: ручной ключ = жёсткое ограничение; сервер перетрекает только участок
+    // между соседними ключами, остальные ключи не трогает.
+    function addTrackingManualKey() {
+        const clip = findClipById(state.selectedClipId);
+        if (!clip || !trackingBox) {
+            showToast("Выбери клип и нарисуй рамку цели в нужном кадре.", "info");
+            return;
+        }
+        const base = findTrackingBaseClip(clip);
+        if (!base || !base.media) return;
+        const srcT = (base.sourceOffset || 0) + Math.max(0, state.currentTime - base.startTime);
+        const list = clip.trackingManualKeys = clip.trackingManualKeys || [];
+        const mk = { t: Math.round(srcT * 1000) / 1000, x: trackingBox.x, y: trackingBox.y, w: trackingBox.w, h: trackingBox.h };
+        const i = list.findIndex(k => Math.abs(k.t - srcT) < 0.2);
+        if (i >= 0) list[i] = mk; else { list.push(mk); list.sort((a, b) => a.t - b.t); }
+        showToast(`Ручной ключ @ ${srcT.toFixed(2)}с добавлен — перетрекиваю участок.`, "ok");
+        runObjectTracking();
+    }
     function initTrackingUI() {
         const selectBtn = document.getElementById("trackSelectBtn");
         const runBtn = document.getElementById("trackRunBtn");
@@ -5119,6 +5315,7 @@
             const clip = findClipById(state.selectedClipId);
             if (clip) {
                 delete clip.trackPath;
+                delete clip.trackingManualKeys;
                 trackingBox = null;
                 renderTimeline();
                 syncVideoToCurrentTime();
@@ -5126,6 +5323,16 @@
                 saveProject();
             }
         });
+        // §10.5: ручной корректирующий ключ в текущем кадре + перетрекинг участка
+        if (runBtn && runBtn.parentElement) {
+            const mkBtn = document.createElement("button");
+            mkBtn.id = "trackManualKeyBtn";
+            mkBtn.className = runBtn.className || "btn";
+            mkBtn.title = "Ручной ключ ◆: подвинь рамку в нужном кадре и нажми — участок до соседнего ключа перетрекится";
+            mkBtn.textContent = "◆ Ручной ключ";
+            mkBtn.addEventListener("click", addTrackingManualKey);
+            runBtn.parentElement.insertBefore(mkBtn, clearBtn || runBtn.nextSibling);
+        }
 
         // Rubber-band drawing on the monitor
         if (videoMonitor) {
@@ -5411,17 +5618,33 @@
         const runBtn = document.getElementById("trackRunBtn");
         if (status) status.textContent = "Трекинг выполняется…";
         if (runBtn) runBtn.disabled = true;
+        // §10: раздельные цель и зона. Зона по умолчанию = цель ×3, клипп к кадру;
+        // ручные ключи клиента передаются как жёсткие ограничения.
+        const zone = clip.trackingZone || (() => {
+            const zw = Math.min(1, trackingBox.w * 3), zh = Math.min(1, trackingBox.h * 3);
+            return {
+                x: Math.max(0, Math.min(1 - zw, trackingBox.x + trackingBox.w / 2 - zw / 2)),
+                y: Math.max(0, Math.min(1 - zh, trackingBox.y + trackingBox.h / 2 - zh / 2)),
+                w: zw, h: zh
+            };
+        })();
         try {
             const res = await fetch("/api/track-object", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     filename: base.media.filename,
-                    start_time: srcStart,
-                    duration: dur,
-                    x: trackingBox.x, y: trackingBox.y,
-                    w: trackingBox.w, h: trackingBox.h,
-                    sample_fps: 12
+                    t_from: srcStart,
+                    t_to: srcEnd,
+                    t_anchor: srcStart,
+                    target: { x: trackingBox.x, y: trackingBox.y, w: trackingBox.w, h: trackingBox.h },
+                    zone: zone,
+                    manual_keys: clip.trackingManualKeys || [],
+                    mode: "ncc",
+                    fps: 12,
+                    analysis_width: 960,
+                    scale_search: false,
+                    min_conf: 0.55
                 })
             });
             if (!res.ok) {
@@ -5431,10 +5654,18 @@
                 return;
             }
             const data = await res.json();
-            // Keyframe times are already relative to the requested window = clip start
+            // §10.4: ключи в абсолютном времени источника; для превью используем
+            // legacy-ключи (t относительно клипа), conf/lost — для полосы уверенности.
+            const keys = data.keys || [];
             clip.trackPath = (data.keyframes || []).map(k => ({
                 t: k.t, x: k.x, y: k.y, w: k.w, h: k.h
             }));
+            clip.trackConf = keys.map(k => ({ t: k.t - srcStart, conf: k.conf, lost: !!k.lost, manual: !!k.manual }));
+            clip.trackingZone = zone;
+            const lostN = keys.filter(k => k.lost).length;
+            if (status) status.textContent = lostN
+                ? `Трек готов: ${keys.length} ключей, потерян ${lostN} кадров — подвинь рамку там и добавь ручной ключ.`
+                : `Трек готов: ${keys.length} ключей, потерь нет.`;
             trackingBox = { ...trackingBox };
             renderTimeline();
             syncVideoToCurrentTime();

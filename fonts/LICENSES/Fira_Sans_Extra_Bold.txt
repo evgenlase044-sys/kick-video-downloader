@@ -1,0 +1,20 @@
+Font family: Fira Sans Extra Bold
+Bundled file: fonts/firasans-FiraSans-ExtraBold.ttf
+Source: Google Fonts (https://fonts.google.com)
+License: SIL Open Font License 1.1
+License URL: https://openfontlicense.org
+
+Digitized data copyright 2012-2016, The Mozilla Foundation and Telefonica S.A.
+
+Designer: Carrois Corporate & Edenspiekermann AG
+
+Manufacturer: Carrois Corporate GbR & Edenspiekermann AG
+
+License record embedded in the font:
+Licensed under the Open Font License, version 1.1 or later
+
+License URL (embedded): http://scripts.sil.org/OFL
+
+This font is bundled with Kick Clip Studio under the terms above.
+OFL 1.1 permits bundling and redistribution; sellling the font on its own
+and using Reserved Font Names for modified versions is not allowed.

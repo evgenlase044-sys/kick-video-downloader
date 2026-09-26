@@ -1,0 +1,20 @@
+Font family: Exo 2 Black
+Bundled file: fonts/exo2-exo2-black.ttf
+Source: Google Fonts (https://fonts.google.com)
+License: SIL Open Font License 1.1
+License URL: https://openfontlicense.org
+
+Copyright 2013 The Exo 2 Project Authors (https://github.com/googlefonts/Exo-2.0)
+
+Designer: Natanael Gama
+
+Manufacturer: Natanael Gama
+
+License record embedded in the font:
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org
+
+License URL (embedded): https://openfontlicense.org
+
+This font is bundled with Kick Clip Studio under the terms above.
+OFL 1.1 permits bundling and redistribution; sellling the font on its own
+and using Reserved Font Names for modified versions is not allowed.

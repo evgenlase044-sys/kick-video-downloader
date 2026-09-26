@@ -8,7 +8,7 @@
   },
   "keywords": ["kick", "video", "downloader", "hls", "vod"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "electron": "^44.4.4"
   }

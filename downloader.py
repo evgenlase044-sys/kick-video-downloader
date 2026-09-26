@@ -217,12 +217,15 @@ class KickDownloader:
                     f.write(f"file '{fname}'\n")
 
             # Execute ffmpeg concat
+            # §17.1: tag BT.709 (limited range) without re-encoding, so every
+            # downstream consumer decodes the same colours the stream had.
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "concat",
                 "-safe", "0",
                 "-i", concat_list_path,
                 "-c", "copy",
+                "-bsf:v", "h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0",
                 "-movflags", "+faststart",
                 final_mp4_path
             ]

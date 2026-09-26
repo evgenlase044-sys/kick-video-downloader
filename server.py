@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import math
 import asyncio
 import threading
 import subprocess
@@ -34,6 +35,7 @@ try:
     import tempfile
     _fc_cache = os.path.join(tempfile.gettempdir(), "fontconfig-cache")
     os.makedirs(_fc_cache, exist_ok=True)
+    _conf_path = os.path.join(FONTS_DIR, "fonts.conf")
     _conf_xml = f"""<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig>
@@ -42,8 +44,10 @@ try:
   <cachedir>{_fc_cache}</cachedir>
 </fontconfig>
 """
-    with open(os.path.join(FONTS_DIR, "fonts.conf"), "w", encoding="utf-8") as _fconf:
-        _fconf.write(_conf_xml)
+    # H8: never clobber a user-edited fonts.conf at startup; only seed it once.
+    if not os.path.exists(_conf_path):
+        with open(_conf_path, "w", encoding="utf-8") as _fconf:
+            _fconf.write(_conf_xml)
 except Exception:
     pass
 
@@ -75,7 +79,47 @@ os.makedirs(EXPORTED_PACKS_DIR, exist_ok=True)
 os.makedirs(SFX_DIR, exist_ok=True)
 os.makedirs(WEB_DIR, exist_ok=True)
 
-app = FastAPI(title="Kick Video Studio", version="2.0.0")
+app = FastAPI(title="Kick Video Studio", version="3.0.0")
+
+SERVER_STARTED_AT = time.time()
+
+# N16: version identity so Electron can detect a stale/foreign server.py that
+# is already listening on the port and restart it instead of reusing it.
+def server_version() -> dict:
+    sha = "unknown"
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=BASE_DIR, timeout=5,
+            text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        pass
+    try:
+        mtime = int(os.path.getmtime(os.path.join(BASE_DIR, "server.py")) * 1000)
+    except Exception:
+        mtime = 0
+    return {
+        "sha": sha,
+        "server_dir": BASE_DIR,
+        "server_mtime": mtime,
+        "pid": os.getpid(),
+        "started_at": SERVER_STARTED_AT,
+        "api": 3,
+    }
+
+
+@app.get("/api/version")
+def api_version():
+    return server_version()
+
+
+@app.post("/api/shutdown")
+async def api_shutdown():
+    """Self-terminate so Electron can restart a stale backend (N16)."""
+    async def _die():
+        await asyncio.sleep(0.3)
+        os.kill(os.getpid(), 9)
+    asyncio.get_event_loop().create_task(_die())
+    return {"status": "shutting_down"}
 
 extractor = KickExtractor(BASE_DIR)
 calculator = SizeCalculator()
@@ -774,7 +818,74 @@ def delete_media(req: DeleteMediaRequest):
 
 # ── Groq Whisper Cloud Auto-Transcription ───────────────────────────
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+# Overridable for tests / proxies (G1).
+GROQ_API_URL = os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1/audio/transcriptions")
 DEFAULT_SPEECH_PROMPT = "Разговорная речь, видеоблог, нарезка, мемы, стрим, сленг, TikTok, YouTube Shorts, Reels, субтитры. Четкая пунктуация, заглавные буквы, эмоциональная интонация."
+
+# G1: known Whisper hallucinations on silence. Editable by the user.
+GHOST_PHRASES_PATH = os.path.join(DOWNLOADS_DIR, ".cache", "asr", "ghost_phrases.json")
+DEFAULT_GHOST_PHRASES = [
+    "Продолжение следует", "Субтитры сделал", "Субтитры читал", "Субтитры читает",
+    "Спасибо за просмотр", "Редактор субтитров", "Подписывайтесь на канал",
+    "Thanks for watching", "Please subscribe", "Subtitles by", "Subtitles made by",
+    "Amara.org community", "Смотреть до конца",
+]
+
+def _load_ghost_phrases() -> List[str]:
+    try:
+        with open(GHOST_PHRASES_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            if isinstance(data, list) and data:
+                return [str(p) for p in data]
+    except Exception:
+        pass
+    try:
+        os.makedirs(os.path.dirname(GHOST_PHRASES_PATH), exist_ok=True)
+        with open(GHOST_PHRASES_PATH, "w", encoding="utf-8") as fh:
+            json.dump(DEFAULT_GHOST_PHRASES, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    return list(DEFAULT_GHOST_PHRASES)
+
+def _norm_phrase(p: str) -> str:
+    return "".join(ch for ch in p.lower() if ch.isalnum()).strip()
+
+ASR_CACHE_DIR = os.path.join(DOWNLOADS_DIR, ".cache", "asr")
+# G1: Groq free tier accepts 25 MB uploads — stay under it (module-level for tests)
+ASR_SIZE_LIMIT = 24 * 1024 * 1024
+ASR_CHUNK_LEN = 600.0       # seconds per chunk when over the size limit
+ASR_CHUNK_OVERLAP = 5.0     # seconds of overlap between chunks
+
+def _asr_cache_key(file_path: str, start: float, end: float, model: str,
+                   language: Optional[str], prompt: Optional[str]) -> str:
+    import hashlib
+    st = os.stat(file_path)
+    raw = "|".join([
+        os.path.abspath(file_path), str(st.st_size), str(int(st.st_mtime)),
+        f"{start:.3f}", f"{end:.3f}", model, language or "", prompt or "",
+    ])
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+def _asr_cache_read(key: str) -> Optional[Dict[str, Any]]:
+    try:
+        path = os.path.join(ASR_CACHE_DIR, key + ".json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+    except Exception:
+        pass
+    return None
+
+def _asr_cache_write(key: str, payload: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(ASR_CACHE_DIR, exist_ok=True)
+        path = os.path.join(ASR_CACHE_DIR, key + ".json")
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        os.replace(tmp, path)
+    except Exception:
+        pass
 
 class TranscribeRequest(BaseModel):
     filename: str
@@ -841,11 +952,116 @@ def build_segments_from_words(words: List[Dict[str, Any]], base_offset: float = 
 
     return segments
 
+def _extract_asr_audio(file_path: str, start: float, duration: Optional[float], out_path: str) -> None:
+    """G1: lossless mono 16 kHz FLAC slice (Groq downsamples to 16 kHz mono anyway)."""
+    cmd = ["ffmpeg", "-y", "-ss", str(max(0.0, start))]
+    if duration and duration > 0:
+        cmd.extend(["-t", str(duration)])
+    cmd.extend(["-i", file_path, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "flac", out_path])
+    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=300)
+    if res.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        err_msg = (res.stderr or "")[-200:]
+        raise HTTPException(status_code=500, detail=f"Ошибка извлечения аудиодорожки: {err_msg}")
+
+def _groq_post(audio_path: str, *, model: str, language: Optional[str], prompt: str) -> Dict[str, Any]:
+    """G1: single Groq call with retries on 429/5xx/timeouts (exp backoff, max 5)."""
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "User-Agent": "KickClipStudio/3.0"}
+    attempts = 0
+    last_detail = "Groq API недоступен"
+    while attempts < 5:
+        attempts += 1
+        try:
+            with open(audio_path, "rb") as f:
+                files = {"file": (os.path.basename(audio_path), f, "audio/flac")}
+                data: List[tuple] = [
+                    ("model", model),
+                    ("response_format", "verbose_json"),
+                    ("timestamp_granularities[]", "word"),
+                    ("timestamp_granularities[]", "segment"),
+                    ("temperature", "0"),
+                    ("prompt", prompt),
+                ]
+                if language:
+                    data.append(("language", language))
+                resp = requests.post(GROQ_API_URL, files=files, data=data, headers=headers, timeout=120)
+        except requests.RequestException as exc:
+            last_detail = f"Сеть/Groq недоступны: {exc}"
+            if attempts >= 5:
+                break
+            time.sleep(min(16, 2 ** attempts))
+            continue
+        if resp.status_code == 200:
+            return resp.json()
+        # Some models reject the `segment` granularity — degrade gracefully.
+        if resp.status_code in (400, 422) and "granularit" in (resp.text or "").lower():
+            try:
+                with open(audio_path, "rb") as f:
+                    files = {"file": (os.path.basename(audio_path), f, "audio/flac")}
+                    data = [d for d in data if d[0] != "timestamp_granularities[]" or d[1] == "word"]
+                    resp = requests.post(GROQ_API_URL, files=files, data=data, headers=headers, timeout=120)
+                if resp.status_code == 200:
+                    return resp.json()
+            except requests.RequestException:
+                pass
+        if resp.status_code == 400:  # permanent — no point retrying
+            raise HTTPException(status_code=400, detail=f"Ошибка Groq API (400): {resp.text[:300]}")
+        last_detail = f"Ошибка Groq API ({resp.status_code}): {resp.text[:300]}"
+        if resp.status_code not in (429, 500, 502, 503, 504) and attempts >= 5:
+            break
+        retry_after = resp.headers.get("Retry-After")
+        try:
+            delay = float(retry_after) if retry_after else min(16, 2 ** attempts)
+        except ValueError:
+            delay = min(16, 2 ** attempts)
+        time.sleep(max(0.0, min(delay, 30)))
+    raise HTTPException(status_code=502, detail=f"Groq API: повторные попытки исчерпаны. {last_detail}")
+
+def _groq_words_and_filter(gj: Dict[str, Any], chunk_offset: float, ghost_set: set) -> tuple:
+    """Parse Groq verbose_json: word timestamps, drop hallucinated segments and ghost phrases."""
+    # 1) time ranges of hallucinated segments (needs `segment` granularity)
+    bad_ranges: List[tuple] = []
+    for seg in gj.get("segments", []) or []:
+        try:
+            nsp = float(seg.get("no_speech_prob", 0.0))
+            alp = float(seg.get("avg_logprob", 0.0))
+            if nsp > 0.6 and alp < -1.0:
+                bad_ranges.append((float(seg.get("start", 0.0)), float(seg.get("end", 0.0))))
+        except (TypeError, ValueError):
+            continue
+    def _bad(t0: float, t1: float) -> bool:
+        c = (t0 + t1) / 2.0
+        return any(rs - 0.05 <= c <= re + 0.05 for rs, re in bad_ranges)
+
+    words: List[Dict[str, Any]] = []
+    for w in gj.get("words", []) or []:
+        word_str = str(w.get("word", "")).strip()
+        if not word_str:
+            continue
+        s = float(w.get("start", 0.0)); e = float(w.get("end", 0.0))
+        if _bad(s, e):
+            continue
+        words.append({"word": word_str, "start": round(s, 3), "end": round(e, 3)})
+    # 2) ghost phrases on silence: match runs of up to 5 consecutive words
+    dropped: List[bool] = [False] * len(words)
+    for i in range(len(words)):
+        acc = ""
+        for j in range(i, min(i + 5, len(words))):
+            acc = _norm_phrase(acc + words[j]["word"])
+            if acc and acc in ghost_set:
+                for k in range(i, j + 1):
+                    dropped[k] = True
+                break
+    clean = [dict(w, start=round(w["start"] + chunk_offset, 3), end=round(w["end"] + chunk_offset, 3))
+             for w, d in zip(words, dropped) if not d]
+    return clean, len(bad_ranges)
+
 @app.post("/api/transcribe")
 def transcribe_media(req: TranscribeRequest):
     """
-    Server-side speech recognition using Groq Whisper API (whisper-large-v3-turbo).
-    Returns word-level timestamps and smart subtitle segments.
+    Server-side speech recognition using Groq Whisper API (whisper-large-v3-turbo
+    / whisper-large-v3). Returns word-level timestamps and subtitle segments.
+    G1 reliability: FLAC slices, size limit + chunking with overlap, retries,
+    language, word+segment granularities, hallucination filter, disk cache.
     NO local heavy neural networks used.
     """
     base_name = os.path.basename(req.filename)
@@ -856,94 +1072,122 @@ def transcribe_media(req: TranscribeRequest):
         else:
             raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
 
-    # Extract lightweight mono 16kHz audio slice via FFmpeg
-    temp_id = int(time.time() * 1000)
-    temp_audio = os.path.join(DOWNLOADS_DIR, f"temp_transcribe_{temp_id}.mp3")
-
-    cmd = ["ffmpeg", "-y", "-ss", str(max(0.0, req.start_time))]
-    if req.duration and req.duration > 0:
-        cmd.extend(["-t", str(req.duration)])
-    cmd.extend([
-        "-i", file_path,
-        "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k",
-        "-f", "mp3", temp_audio
-    ])
-
-    try:
-        sub_res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=60)
-        if sub_res.returncode != 0 or not os.path.exists(temp_audio) or os.path.getsize(temp_audio) == 0:
-            err_msg = sub_res.stderr[-200:] if sub_res.stderr else "Empty audio"
-            raise HTTPException(status_code=500, detail=f"Ошибка извлечения аудиодорожки: {err_msg}")
-    except Exception as e:
-        if os.path.exists(temp_audio):
-            os.remove(temp_audio)
-        raise HTTPException(status_code=500, detail=f"FFmpeg ошибка: {str(e)}")
-
-    # Send to Groq Whisper API
     if not GROQ_API_KEY:
-        if os.path.exists(temp_audio):
-            os.remove(temp_audio)
         raise HTTPException(status_code=400, detail="GROQ_API_KEY не задан в .env или переменных окружения")
 
+    start = max(0.0, float(req.start_time))
+    dur = float(req.duration) if req.duration and req.duration > 0 else None
+    end_hint = start + dur if dur is not None else -1.0
+    prompt = req.prompt or DEFAULT_SPEECH_PROMPT
+    model = req.model or "whisper-large-v3-turbo"
+
+    temp_id = int(time.time() * 1000)
+    temp_audio = os.path.join(DOWNLOADS_DIR, f"temp_transcribe_{temp_id}.flac")
     try:
-        with open(temp_audio, "rb") as f:
-            files = {"file": (os.path.basename(temp_audio), f, "audio/mpeg")}
-            data = {
-                "model": req.model or "whisper-large-v3-turbo",
-                "response_format": "verbose_json",
-                "timestamp_granularities[]": "word",
-                "temperature": "0.0",
-                "prompt": req.prompt or DEFAULT_SPEECH_PROMPT
-            }
-            if req.language:
-                data["language"] = req.language
+        _extract_asr_audio(file_path, start, dur, temp_audio)
+        total_bytes = os.path.getsize(temp_audio)
+        total_dur = dur
+        if total_dur is None:
+            try:
+                p = subprocess.run(
+                    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                     "-of", "default=nw=1:nk=1", temp_audio],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
+                total_dur = float(p.stdout.strip())
+            except Exception:
+                total_dur = 0.0
 
-            headers = {
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "User-Agent": "Corsica-General-Server/1.0"
-            }
+        # G1: whole-request cache (same file/fragment/model/language/prompt)
+        cache_key = _asr_cache_key(file_path, start, end_hint if end_hint > 0 else (start + (total_dur or 0)), model, req.language, prompt)
+        cached = _asr_cache_read(cache_key)
+        if cached is not None:
+            cached = dict(cached)
+            cached["cache"] = "hit"
+            return cached
 
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/audio/transcriptions",
-                files=files,
-                data=data,
-                headers=headers,
-                timeout=90
-            )
+        # G1: 24 MB limit -> chunking with 5 s overlap
+        LIMIT = ASR_SIZE_LIMIT
+        chunk_plan: List[tuple] = []  # (offset_in_slice, chunk_dur)
+        if total_bytes > LIMIT and total_dur and total_dur > 0:
+            n_chunks = max(2, int(total_bytes / (LIMIT * 0.75)) + 1)
+            chunk_len = min(ASR_CHUNK_LEN, max(1.0, total_dur / n_chunks))
+            overlap = min(ASR_CHUNK_OVERLAP, chunk_len / 2.0)
+            pos = 0.0
+            while pos < total_dur - 0.01:
+                cdur = min(chunk_len, total_dur - pos)
+                chunk_plan.append((pos, cdur))
+                pos += max(overlap, chunk_len - overlap)
+        else:
+            chunk_plan.append((0.0, total_dur))
 
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=resp.status_code,
-                detail=f"Ошибка Groq API ({resp.status_code}): {resp.text}"
-            )
+        ghost_set = {_norm_phrase(p) for p in _load_ghost_phrases() if p.strip()}
+        all_words: List[Dict[str, Any]] = []
+        bad_segments_total = 0
+        for (cpos, cdur) in chunk_plan:
+            part_path = temp_audio if len(chunk_plan) == 1 else os.path.join(DOWNLOADS_DIR, f"temp_transcribe_{temp_id}_{int(cpos)}.flac")
+            if len(chunk_plan) > 1:
+                cmd = ["ffmpeg", "-y", "-ss", f"{cpos:.3f}", "-t", f"{cdur:.3f}", "-i", temp_audio,
+                       "-c:a", "flac", part_path]
+                res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+                if res.returncode != 0 or not os.path.exists(part_path) or os.path.getsize(part_path) == 0:
+                    continue
+            try:
+                gj = _groq_post(part_path, model=model, language=req.language, prompt=prompt)
+                chunk_words, bad_n = _groq_words_and_filter(gj, chunk_offset=start + cpos, ghost_set=ghost_set)
+                bad_segments_total += bad_n
+                # resolve overlap: keep the copy whose word center is farther from the chunk edge
+                edge = cdur
+                for w in chunk_words:
+                    center = w["start"] - (start + cpos)
+                    distance = min(center, edge - center)
+                    w["_edge_dist"] = distance
+                    w["_chunk_seq"] = len(all_words)
+                all_words.extend(chunk_words)
+            finally:
+                if part_path != temp_audio and os.path.exists(part_path):
+                    try:
+                        os.remove(part_path)
+                    except Exception:
+                        pass
 
-        result_data = resp.json()
-        raw_words = result_data.get("words", [])
-        clean_words = []
-        for w in raw_words:
-            word_str = w.get("word", "").strip()
-            if word_str:
-                start_sec = float(w.get("start", 0.0))
-                end_sec = float(w.get("end", 0.0))
-                clean_words.append({
-                    "word": word_str,
-                    "start": round(start_sec, 3),
-                    "end": round(end_sec, 3),
-                    "abs_start": round(start_sec + req.start_time, 3),
-                    "abs_end": round(end_sec + req.start_time, 3),
-                })
+        # dedup overlap words
+        merged: List[Dict[str, Any]] = []
+        for w in sorted(all_words, key=lambda x: (x["start"], x["end"])):
+            if merged and abs(merged[-1]["start"] - w["start"]) < 0.30:
+                prev = merged[-1]
+                same_text = prev["word"].strip().lower() == w["word"].strip().lower()
+                if same_text or w["_edge_dist"] > prev["_edge_dist"] + 0.5:
+                    if w["_edge_dist"] > prev["_edge_dist"]:
+                        merged[-1] = w
+                    continue
+            merged.append(w)
+        for w in merged:
+            w.pop("_edge_dist", None)
+            w.pop("_chunk_seq", None)
+        clean_words = [
+            {"word": w["word"], "start": w["start"], "end": w["end"],
+             "abs_start": round(w["start"], 3), "abs_end": round(w["end"], 3)}
+            for w in merged if w["end"] > w["start"]
+        ]
+        # words shorter than 2 frames at 60 fps are unusable
+        clean_words = [w for w in clean_words if (w["end"] - w["start"]) >= 0.02 or w["end"] > w["start"]]
 
-        segments = build_segments_from_words(clean_words, base_offset=req.start_time)
-
-        return {
+        segments = build_segments_from_words(clean_words, base_offset=0.0)
+        full_text = " ".join(w["word"] for w in clean_words).strip()
+        payload = {
             "status": "ok",
-            "text": result_data.get("text", "").strip(),
-            "language": result_data.get("language", "auto"),
-            "duration": result_data.get("duration", 0.0),
+            "text": full_text,
+            "language": req.language or "auto",
+            "duration": total_dur or 0.0,
             "words": clean_words,
             "segments": segments,
-            "start_offset": req.start_time
+            "start_offset": start,
+            "cache": "miss",
+            "chunks": len(chunk_plan),
+            "filtered_hallucinations": bad_segments_total,
         }
+        _asr_cache_write(cache_key, payload)
+        return payload
     except HTTPException:
         raise
     except Exception as e:
@@ -955,115 +1199,423 @@ def transcribe_media(req: TranscribeRequest):
             except Exception:
                 pass
 
-# ── Object Tracking (template-matching tracker over ffmpeg-extracted frames) ──
-class TrackObjectRequest(BaseModel):
-    filename: str
-    start_time: float = 0.0
-    duration: Optional[float] = None
-    x: float  # normalized 0..1, search box top-left
+# ── Object Tracking: manual target + restricted search zone (PLAN §10) ──
+class Box(BaseModel):
+    """Normalized 0..1 box in source space."""
+    x: float
     y: float
     w: float
     h: float
+
+class ZoneKey(Box):
+    t: float
+
+class TrackRequest(BaseModel):
+    filename: str
+    t_from: float
+    t_to: float
+    t_anchor: float                       # frame carrying the target box
+    target: Optional[Box] = None          # required (fallback: x/y/w/h legacy)
+    zone: Optional[Box] = None            # static zone
+    zone_keys: Optional[List[ZoneKey]] = None   # or animated zone
+    manual_keys: List[ZoneKey] = []       # hard user keys
+    mode: str = "ncc"                     # ncc | csrt
+    fps: float = 0                        # 0 = native region fps (clamped)
+    analysis_width: int = 960
+    scale_search: bool = False            # multiscale 0.97/1/1.03
+    min_conf: float = 0.55
+    # legacy single-box API (pre-§10 clients)
+    start_time: Optional[float] = None
+    duration: Optional[float] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
+    w: Optional[float] = None
+    h: Optional[float] = None
     sample_fps: float = 12.0
 
-def _extract_tracking_frames(video_path: str, start_time: float, duration: Optional[float],
-                             fps: float, out_dir: str, max_w: int = 640) -> int:
-    os.makedirs(out_dir, exist_ok=True)
-    cmd = ["ffmpeg", "-y", "-ss", str(max(0.0, start_time))]
-    if duration and duration > 0:
-        cmd.extend(["-t", str(duration)])
-    cmd.extend([
-        "-i", video_path,
-        "-vf", f"fps={fps},scale='min({max_w},iw)':-2",
-        "-q:v", "2",
-        os.path.join(out_dir, "%05d.jpg")
-    ])
-    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=180)
-    frames = sorted(f for f in os.listdir(out_dir) if f.endswith(".jpg"))
-    if res.returncode != 0 or not frames:
-        raise HTTPException(status_code=500, detail=f"Не удалось извлечь кадры для трекинга: {(res.stderr or '')[-200:]}")
-    return len(frames)
+class _LowPass:
+    def __init__(self) -> None:
+        self.y: Optional[float] = None
+    def __call__(self, x: float, alpha: float) -> float:
+        self.y = x if self.y is None else alpha * x + (1.0 - alpha) * self.y
+        return self.y
 
-def _run_template_tracker(frames_dir: str, fps: float, box_norm: Dict[str, float]) -> List[Dict[str, Any]]:
+class _OneEuro:
+    """PLAN §10.3: One Euro (minCutoff 1.0 Hz, beta 0.02, dCutoff 1.0)."""
+    def __init__(self, min_cutoff: float = 1.0, beta: float = 0.02, d_cutoff: float = 1.0) -> None:
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self.xf = _LowPass()
+        self.df = _LowPass()
+        self.xprev: Optional[float] = None
+    @staticmethod
+    def _alpha(cutoff: float, dt: float) -> float:
+        tau = 1.0 / (2.0 * math.pi * max(1e-6, cutoff))
+        return 1.0 / (1.0 + tau / max(1e-6, dt))
+    def __call__(self, x: float, dt: float) -> float:
+        dx = 0.0 if self.xprev is None else (x - self.xprev) / max(1e-6, dt)
+        self.xprev = x
+        edx = self.df(dx, self._alpha(self.d_cutoff, dt))
+        cutoff = self.min_cutoff + self.beta * abs(edx)
+        return self.xf(x, self._alpha(cutoff, dt))
+
+def _probe_video_size(video_path: str) -> tuple:
+    res = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height,avg_frame_rate", "-of", "json", video_path],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
+    w, h, fr = 0, 0, ""
+    try:
+        st = json.loads(res.stdout or "{}")["streams"][0]
+        w, h = int(st.get("width", 0)), int(st.get("height", 0))
+        fr = st.get("avg_frame_rate", "") or ""
+    except Exception:
+        pass
+    if not (w and h):
+        raise HTTPException(status_code=500, detail="Не удалось определить размер видео")
+    return w, h, fr
+
+def _iter_gray_frames(video_path: str, t_from: float, t_to: float, fps: float,
+                      analysis_width: int):
+    """Yield (t, np.ndarray HxW gray) frames via ffmpeg pipe — no temp JPEGs (§10.3)."""
+    import numpy as np
+    src_w, src_h, _ = _probe_video_size(video_path)
+    out_w = max(32, min(analysis_width, src_w))
+    out_h = max(32, int(round(src_h * out_w / src_w / 2.0)) * 2)
+    dur = max(0.0, t_to - t_from)
+    cmd = ["ffmpeg", "-loglevel", "error", "-ss", f"{max(0.0, t_from):.3f}",
+           "-t", f"{dur:.3f}", "-i", video_path,
+           "-vf", f"fps={fps},scale={out_w}:{out_h},format=gray",
+           "-f", "rawvideo", "pipe:1"]
+    frame_bytes = out_w * out_h
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    idx = 0
+    try:
+        while True:
+            buf = proc.stdout.read(frame_bytes)
+            if not buf or len(buf) < frame_bytes:
+                break
+            yield (idx / fps, np.frombuffer(buf, dtype=np.uint8).reshape(out_h, out_w))
+            idx += 1
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except Exception:
+            proc.kill()
+
+def _zone_at_time(zone: Optional[Box], zone_keys: Optional[List[ZoneKey]], t: float,
+                  frame_w: int, frame_h: int) -> tuple:
+    """Absolute zone box in normalized coords -> (x0,y0,x1,y1) px, clamped to frame."""
+    if zone_keys:
+        zk = sorted(zone_keys, key=lambda k: k.t)
+        if t <= zk[0].t:
+            b = zk[0]
+        elif t >= zk[-1].t:
+            b = zk[-1]
+        else:
+            a = zk[0]; b = zk[-1]
+            for i in range(len(zk) - 1):
+                if zk[i].t <= t <= zk[i + 1].t:
+                    a, b = zk[i], zk[i + 1]
+                    break
+            f = (t - a.t) / max(1e-6, (b.t - a.t))
+            b = Box(x=a.x + (b.x - a.x) * f, y=a.y + (b.y - a.y) * f,
+                    w=a.w + (b.w - a.w) * f, h=a.h + (b.h - a.h) * f)
+    elif zone is not None:
+        b = zone
+    else:
+        b = Box(x=0.0, y=0.0, w=1.0, h=1.0)
+    x0 = max(0.0, b.x) * frame_w
+    y0 = max(0.0, b.y) * frame_h
+    x1 = min(1.0, b.x + b.w) * frame_w
+    y1 = min(1.0, b.y + b.h) * frame_h
+    if x1 - x0 < 8 or y1 - y0 < 8:      # degenerate zone -> whole frame
+        x0, y0, x1, y1 = 0.0, 0.0, float(frame_w), float(frame_h)
+    return x0, y0, x1, y1
+
+def _clamp_box_into_zone(nx: float, ny: float, nw: float, nh: float, zone_px: tuple,
+                         fw: int, fh: int) -> tuple:
+    """Hard limit: the box must lie fully inside the zone (§10.3)."""
+    zx0, zy0, zx1, zy1 = zone_px
+    px = nx * fw; py = ny * fh; pw = nw * fw; ph = nh * fh
+    pw = min(pw, zx1 - zx0); ph = min(ph, zy1 - zy0)
+    px = min(max(px, zx0), max(zx0, zx1 - pw))
+    py = min(max(py, zy0), max(zy0, zy1 - ph))
+    return px, py, pw, ph
+
+def _track_feature(img):
+    """§10.3 feature: luma + Sobel magnitude. Pure-luma templates with almost
+    no variance (flat patches) make TM_CCOEFF_NORMED numerically unstable."""
     import cv2
     import numpy as np
+    gx = cv2.Sobel(img, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(img, cv2.CV_32F, 0, 1, ksize=3)
+    mag = cv2.magnitude(gx, gy)
+    feat = 0.5 * img.astype(np.float32) + 0.5 * np.clip(mag, 0.0, 255.0)
+    return feat.astype(np.uint8)
 
-    frames = sorted(f for f in os.listdir(frames_dir) if f.endswith(".jpg"))
-    if not frames:
-        raise HTTPException(status_code=500, detail="Нет кадров для трекинга")
+def _patch_shape_ok(shape, tw, th):
+    return tuple(shape) == (th, tw)
 
-    first = cv2.imread(os.path.join(frames_dir, frames[0]))
-    fh, fw = first.shape[:2]
-    bx = max(0.0, min(0.95, box_norm["x"]))
-    by = max(0.0, min(0.95, box_norm["y"]))
-    bw = max(0.01, min(1.0 - bx, box_norm["w"]))
-    bh = max(0.01, min(1.0 - by, box_norm["h"]))
-    px, py, pw, ph = int(bx * fw), int(by * fh), max(8, int(bw * fw)), max(8, int(bh * fh))
+def _ncc_track_run(frames_iter, fps: float, start_box_norm: tuple, start_t: float,
+                   req: "TrackRequest", zone_args: tuple,
+                   forward: bool = True) -> List[Dict[str, Any]]:
+    """NCC template matching with subpixel peak, anchored template, lost state (§10.3).
+    Frame size is taken from the actual analysis frames (start box is normalized)."""
+    import cv2
+    import numpy as np
+    frame_w = frame_h = None
+    template_t0 = None          # anchor template against drift
+    template = None
+    cx = cy = 0.0
+    scale = 1.0
+    lost = False
+    lost_streak = 0
+    found_streak = 0
+    out: List[Dict[str, Any]] = []
+    min_conf = max(0.05, min(0.95, req.min_conf))
 
-    template = first[py:py + ph, px:px + pw].copy()
-    tw, th = pw, ph
-    cx, cy = px + pw / 2.0, py + ph / 2.0  # tracked center
-    path: List[Dict[str, Any]] = []
-    low_conf_streak = 0
-
-    # Strict boundary: tracking is constrained strictly inside the selection area
-    pad_x = int(pw * 0.20)
-    pad_y = int(ph * 0.20)
-    bound_x0 = max(0, px - pad_x)
-    bound_y0 = max(0, py - pad_y)
-    bound_x1 = min(fw, px + pw + pad_x)
-    bound_y1 = min(fh, py + ph + pad_y)
-
-    for idx, fname in enumerate(frames):
-        frame = cv2.imread(os.path.join(frames_dir, fname))
-        if frame is None:
+    for t, frame in frames_iter:
+        frame = _track_feature(frame)
+        if frame_w is None:
+            frame_h, frame_w = frame.shape[:2]
+        if template is None:
+            bx, by, bw_n, bh_n = start_box_norm
+            x0 = int(round(bx * frame_w)); y0 = int(round(by * frame_h))
+            pw0 = max(8, int(round(bw_n * frame_w))); ph0 = max(8, int(round(bh_n * frame_h)))
+            x0 = min(max(0, x0), frame_w - pw0); y0 = min(max(0, y0), frame_h - ph0)
+            abs_t = start_t + (t if forward else -t)
+            patch = frame[y0:y0 + ph0, x0:x0 + pw0]
+            if patch.size == 0:
+                continue
+            template_t0 = patch.astype(np.float32)
+            template = patch.copy()
+            cx = x0 + pw0 / 2.0
+            cy = y0 + ph0 / 2.0
+            out.append({"t": round(abs_t, 3),
+                        "x": round(x0 / frame_w, 5), "y": round(y0 / frame_h, 5),
+                        "w": round(pw0 / frame_w, 5), "h": round(ph0 / frame_h, 5),
+                        "conf": 1.0, "lost": False, "_fw": frame_w, "_fh": frame_h})
             continue
-        if idx > 0:
-            margin = 0.5  # search window bounded inside region
-            sx0 = int(max(bound_x0, cx - tw / 2 - tw * margin))
-            sy0 = int(max(bound_y0, cy - th / 2 - th * margin))
-            sx1 = int(min(bound_x1, cx + tw / 2 + tw * margin))
-            sy1 = int(min(bound_y1, cy + th / 2 + th * margin))
+        abs_t = start_t + (t if forward else -t)
+        zone_px = _zone_at_time(zone_args[0], zone_args[1], abs_t, frame_w, frame_h)
+        found = False
+        conf = 0.0
+        best = None
+        pw0 = template.shape[1]; ph0 = template.shape[0]
+        tw = max(8, int(round(pw0 * scale))); th = max(8, int(round(ph0 * scale)))
+        tmpl = cv2.resize(template, (tw, th), interpolation=cv2.INTER_AREA)
+        # search window = prev_center ± 1.5·size, intersected with the zone
+        sx0 = int(max(zone_px[0], cx - 1.5 * tw))
+        sy0 = int(max(zone_px[1], cy - 1.5 * th))
+        sx1 = int(min(zone_px[2], cx + 1.5 * tw))
+        sy1 = int(min(zone_px[3], cy + 1.5 * th))
+        sx0 = max(0, sx0); sy0 = max(0, sy0)
+        sx1 = min(frame_w, sx1); sy1 = min(frame_h, sy1)
+        if sx1 - sx0 >= tw and sy1 - sy0 >= th and tmpl.shape[0] <= th + 1 and tmpl.size:
             search = frame[sy0:sy1, sx0:sx1]
-            found = False
-            if search.shape[0] >= th and search.shape[1] >= tw and template.size > 0:
-                res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+            scales = [0.97, 1.0, 1.03] if req.scale_search else [1.0]
+            for sc in scales:
+                tw_s = max(8, int(round(pw0 * scale * sc)))
+                th_s = max(8, int(round(ph0 * scale * sc)))
+                if tw_s >= search.shape[1] or th_s >= search.shape[0]:
+                    continue
+                t_s = cv2.resize(template, (tw_s, th_s), interpolation=cv2.INTER_AREA) if sc != 1.0 else tmpl
+                res = cv2.matchTemplate(search, t_s, cv2.TM_CCOEFF_NORMED)
                 _, max_val, _, max_loc = cv2.minMaxLoc(res)
-                if max_val > 0.35:
-                    found = True
-                    cx = sx0 + max_loc[0] + tw / 2.0
-                    cy = sy0 + max_loc[1] + th / 2.0
-                    low_conf_streak = 0
-                    # Adapt template to appearance changes when confident
-                    if max_val > 0.65 and idx % 12 == 0:
-                        nx0 = int(max(0, cx - tw / 2)); ny0 = int(max(0, cy - th / 2))
-                        nx1 = int(min(fw, cx + tw / 2)); ny1 = int(min(fh, cy + th / 2))
-                        if nx1 - nx0 > 7 and ny1 - ny0 > 7:
-                            template = frame[ny0:ny1, nx0:nx1].copy()
-                else:
-                    low_conf_streak += 1
-
-            # Clamp tracked center strictly inside the user selection bounds
-            cx = max(bound_x0 + tw / 2.0, min(bound_x1 - tw / 2.0, cx))
-            cy = max(bound_y0 + th / 2.0, min(bound_y1 - th / 2.0, cy))
-
-        norm_x = round(max(0.0, min(1.0, (cx - tw / 2.0) / fw)), 4)
-        norm_y = round(max(0.0, min(1.0, (cy - th / 2.0) / fh)), 4)
-        path.append({
-            "t": round(idx / fps, 3),
-            "x": norm_x,
-            "y": norm_y,
-            "w": round(tw / fw, 4),
-            "h": round(th / fh, 4),
+                if best is None or max_val > best[0]:
+                    best = (max_val, max_loc, tw_s, th_s, sc, res)
+        if best is not None and best[0] > 0.0:
+            max_val, (mlx, mly), tw_b, th_b, sc, res = best
+            conf = float(max_val)
+            if conf > min_conf:
+                found = True
+                # subpixel peak: parabola over the 3x3 neighbourhood (§10.3)
+                dx = dy = 0.0
+                rh, rw = res.shape
+                if 0 < mlx < rw - 1:
+                    l, c, r = float(res[mly, mlx - 1]), float(res[mly, mlx]), float(res[mly, mlx + 1])
+                    den = l - 2.0 * c + r
+                    if abs(den) > 1e-6:
+                        dx = max(-0.5, min(0.5, 0.5 * (l - r) / den))
+                if 0 < mly < rh - 1:
+                    u, c, d = float(res[mly - 1, mlx]), float(res[mly, mlx]), float(res[mly + 1, mlx])
+                    den = u - 2.0 * c + d
+                    if abs(den) > 1e-6:
+                        dy = max(-0.5, min(0.5, 0.5 * (u - d) / den))
+                cx = sx0 + mlx + dx + tw_b / 2.0
+                cy = sy0 + mly + dy + th_b / 2.0
+                if req.scale_search:
+                    scale = 0.8 * scale + 0.2 * (scale * sc)
+                # template update anchored to the original (anti-drift).
+                # High gate (>0.92): a 0.5px anchor rounding offset makes
+                # confident-but-imperfect matches ghost the template and
+                # cascade into a loss on synthetic content.
+                nx0 = int(max(0, cx - tw_b / 2.0)); ny0 = int(max(0, cy - th_b / 2.0))
+                nx1 = int(min(frame_w, nx0 + tw_b)); ny1 = int(min(frame_h, ny0 + th_b))
+                if nx1 - nx0 > 7 and ny1 - ny0 > 7 and conf > 0.92 and _patch_shape_ok(template.shape, tw_b, th_b):
+                    patch = frame[ny0:ny1, nx0:nx1].astype(np.float32)
+                    if template_t0 is not None:
+                        t0r = cv2.resize(template_t0, (patch.shape[1], patch.shape[0]))
+                        anchor_ncc = float(cv2.matchTemplate(
+                            patch - patch.mean(), t0r - t0r.mean(), cv2.TM_CCOEFF_NORMED)[0, 0])
+                        if anchor_ncc > 0.5:
+                            template = (0.9 * template.astype(np.float32) + 0.1 * patch).astype(np.uint8)
+        if found and conf > min_conf:
+            found_streak += 1
+            lost_streak = 0
+            if lost and found_streak >= 3:
+                lost = False
+        else:
+            found_streak = 0
+            lost_streak += 1
+            if not lost and lost_streak >= 3:
+                lost = True
+        px, py, pw_f, ph_f = _clamp_box_into_zone(
+            (cx - tw / 2.0) / frame_w, (cy - th / 2.0) / frame_h,
+            tw / frame_w, th / frame_h, zone_px, frame_w, frame_h)
+        if not lost:
+            cx = px + pw_f / 2.0
+            cy = py + ph_f / 2.0
+        out.append({
+            "t": round(abs_t, 3),
+            "x": round(px / frame_w, 5), "y": round(py / frame_h, 5),
+            "w": round(pw_f / frame_w, 5), "h": round(ph_f / frame_h, 5),
+            "conf": round(conf, 4), "lost": bool(lost),
+            "_fw": frame_w, "_fh": frame_h,
         })
-    return path
+    return out
+
+def _csrt_track_run(frames_iter, fps: float, start_box_norm: tuple, start_t: float,
+                    req: "TrackRequest", zone_args: tuple,
+                    forward: bool = True) -> List[Dict[str, Any]]:
+    """CSRT tracker on frames cropped to the zone; coordinates mapped back (§10.3)."""
+    import cv2
+    import numpy as np
+    try:
+        ctor = getattr(cv2, "TrackerCSRT", None)
+        tracker = ctor.create() if ctor is not None and hasattr(ctor, "create") else cv2.TrackerCSRT_create()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"CSRT недоступен в этой сборке OpenCV: {exc}")
+    frame_w = frame_h = None
+    out: List[Dict[str, Any]] = []
+    initialized = False
+    lost = False
+    for t, frame in frames_iter:
+        frame = _track_feature(frame)
+        if frame_w is None:
+            frame_h, frame_w = frame.shape[:2]
+        abs_t = start_t + (t if forward else -t)
+        zone_px = _zone_at_time(zone_args[0], zone_args[1], abs_t, frame_w, frame_h)
+        zx0, zy0, zx1, zy1 = [int(v) for v in zone_px]
+        crop = frame[zy0:zy1, zx0:zx1]
+        if crop.size == 0:
+            continue
+        bx, by = None, None
+        ok = False
+        if not initialized:
+            x0 = int(round(start_box_norm[0] * frame_w)) - zx0
+            y0 = int(round(start_box_norm[1] * frame_h)) - zy0
+            pw0 = max(8, int(round(start_box_norm[2] * frame_w)))
+            ph0 = max(8, int(round(start_box_norm[3] * frame_h)))
+            bb = (max(0, x0), max(0, y0), min(pw0, crop.shape[1] - 1), min(ph0, crop.shape[0] - 1))
+            if bb[2] > 7 and bb[3] > 7:
+                tracker.init(crop, bb)
+                initialized = True
+                ok = True
+        else:
+            ok, bb = tracker.update(crop)
+        if initialized and ok:
+            x0 = zx0 + int(bb[0]); y0 = zy0 + int(bb[1])
+            pw0 = max(8, int(bb[2])); ph0 = max(8, int(bb[3]))
+            conf = 1.0
+        else:
+            x0, y0, pw0, ph0 = int(round(start_box_norm[0] * frame_w)), int(round(start_box_norm[1] * frame_h)), 8, 8
+            conf = 0.0
+        px, py, pw_f, ph_f = _clamp_box_into_zone(
+            x0 / frame_w, y0 / frame_h, pw0 / frame_w, ph0 / frame_h, zone_px, frame_w, frame_h)
+        out.append({
+            "t": round(abs_t, 3),
+            "x": round(px / frame_w, 5), "y": round(py / frame_h, 5),
+            "w": round(pw_f / frame_w, 5), "h": round(ph_f / frame_h, 5),
+            "conf": round(conf, 4), "lost": bool(initialized and not ok),
+            "_fw": frame_w, "_fh": frame_h,
+        })
+    return out
+
+def _track_full_range(file_path: str, req: TrackRequest) -> List[Dict[str, Any]]:
+    """Plan §10.2/10.3: split [t_from, t_to] by anchor+manual keys, track each run."""
+    fw_src, fh_src, _ = _probe_video_size(file_path)
+    hard_keys: List[tuple] = []
+    if req.target is not None:
+        hard_keys.append((max(req.t_from, min(req.t_to, req.t_anchor)), req.target))
+    for mk in sorted(req.manual_keys, key=lambda k: k.t):
+        tk = max(req.t_from, min(req.t_to, mk.t))
+        hard_keys.append((tk, Box(x=mk.x, y=mk.y, w=mk.w, h=mk.h)))
+    hard_keys.sort(key=lambda k: k[0])
+    if not hard_keys:
+        raise HTTPException(status_code=400, detail="Нужна рамка цели (target) или manual_keys")
+
+    fps = req.fps if req.fps and req.fps > 0 else req.sample_fps
+    fps = max(2.0, min(30.0, float(fps)))
+    keys: Dict[float, Dict[str, Any]] = {}
+
+    def run_segment(t_start: float, t_end: float, box: Box, forward: bool) -> None:
+        start_box_norm = (box.x, box.y, box.w, box.h)
+        zone_args = (req.zone, req.zone_keys)
+        it = _iter_gray_frames(file_path, min(t_start, t_end), max(t_start, t_end) + 0.0001, fps, req.analysis_width)
+        if req.mode == "csrt":
+            raw = _csrt_track_run(it, fps, start_box_norm, t_start, req, zone_args, forward=forward)
+        else:
+            raw = _ncc_track_run(it, fps, start_box_norm, t_start, req, zone_args, forward=forward)
+        # One Euro smoothing per run, in ANALYSIS-PIXEL units (beta is defined
+        # for px/s velocity); manual/anchor keys are not smoothed.
+        if raw:
+            fw0 = next((k["_fw"] for k in raw if k.get("_fw")), 960)
+            fh0 = next((k["_fh"] for k in raw if k.get("_fh")), 540)
+            filt = {k: _OneEuro() for k in ("x", "y", "w", "h")}
+            prev_t = None
+            for k in raw:
+                dt = 1.0 / fps if prev_t is None else max(1e-3, k["t"] - prev_t)
+                prev_t = k["t"]
+                px_units = {"x": k["x"] * fw0, "y": k["y"] * fh0,
+                            "w": k["w"] * fw0, "h": k["h"] * fh0}
+                sm = {key: filt[key](px_units[key], dt) for key in ("x", "y", "w", "h")}
+                k["x"] = round(sm["x"] / fw0, 5); k["y"] = round(sm["y"] / fh0, 5)
+                k["w"] = round(sm["w"] / fw0, 5); k["h"] = round(sm["h"] / fh0, 5)
+            for k in raw:
+                kt = round(k["t"], 3)
+                existing = keys.get(kt)
+                if existing and existing.get("manual"):
+                    continue  # hard key wins over the run's re-anchored first frame
+                k.pop("_fw", None); k.pop("_fh", None)
+                keys[kt] = k
+
+    # forward runs between hard keys, and before the first / after the last
+    for i, (tk, box) in enumerate(hard_keys):
+        keys[round(tk, 3)] = {"t": round(tk, 3), "x": round(box.x, 5), "y": round(box.y, 5),
+                              "w": round(box.w, 5), "h": round(box.h, 5),
+                              "conf": 1.0, "lost": False, "manual": True}
+        t_next = hard_keys[i + 1][0] if i + 1 < len(hard_keys) else req.t_to
+        if t_next - tk > 1.0 / fps:
+            run_segment(tk, t_next, box, forward=True)
+    t_first = hard_keys[0][0]
+    if t_first - req.t_from > 1.0 / fps:
+        run_segment(t_first, req.t_from, hard_keys[0][1], forward=False)
+    return [keys[k] for k in sorted(keys.keys())]
 
 @app.post("/api/track-object")
-def track_object(req: TrackObjectRequest):
+def track_object(req: TrackRequest):
     """
-    Track an object selected by a normalized box [x,y,w,h] across the media clip.
-    Extracts frames with ffmpeg, runs a template-matching tracker, returns
-    normalized keyframes [{t, x, y, w, h}] relative to clip start.
+    Track a manual target box inside a manual search zone (PLAN §10).
+    Returns normalized keyframes [{t, x, y, w, h, conf, lost, manual}] in
+    absolute source time (`keyframes` keeps legacy clip-relative `t`).
     """
     base_name = os.path.basename(req.filename)
     file_path = os.path.join(DOWNLOADS_DIR, base_name)
@@ -1073,32 +1625,146 @@ def track_object(req: TrackObjectRequest):
         else:
             raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
 
-    if not (0 <= req.x <= 1 and 0 <= req.y <= 1 and req.w > 0 and req.h > 0):
-        raise HTTPException(status_code=400, detail="Некорректная рамка объекта")
+    # legacy single-box API -> new target/zone contract
+    if req.target is None and req.x is not None:
+        req.t_from = req.start_time if req.start_time is not None else 0.0
+        dur = req.duration if req.duration and req.duration > 0 else 10.0
+        req.t_to = req.t_from + dur
+        req.t_anchor = req.t_from
+        req.target = Box(x=req.x, y=req.y, w=req.w or 0.1, h=req.h or 0.1)
+        req.zone = None
+    if req.target is None:
+        raise HTTPException(status_code=400, detail="Не задана рамка цели (target)")
+    if not (0 <= req.target.x <= 1 and 0 <= req.target.y <= 1 and 0 < req.target.w <= 1 and 0 < req.target.h <= 1):
+        raise HTTPException(status_code=400, detail="Некорректная рамка цели")
+    if req.t_to <= req.t_from:
+        raise HTTPException(status_code=400, detail="t_to должен быть больше t_from")
+    if req.mode not in ("ncc", "csrt"):
+        raise HTTPException(status_code=400, detail="mode должен быть ncc или csrt")
+    if req.t_anchor < req.t_from or req.t_anchor > req.t_to:
+        req.t_anchor = max(req.t_from, min(req.t_to, req.t_anchor))
 
-    temp_id = int(time.time() * 1000)
-    frames_dir = os.path.join(DOWNLOADS_DIR, f"temp_track_{temp_id}")
     try:
-        fps = max(4.0, min(24.0, req.sample_fps or 12.0))
-        _extract_tracking_frames(file_path, req.start_time, req.duration, fps, frames_dir)
-        path = _run_template_tracker(frames_dir, fps, {"x": req.x, "y": req.y, "w": req.w, "h": req.h})
-        # Hard clamp: the tracked object may NEVER leave the selection area.
-        # Every keyframe is intersected with (pinned into) the user's box.
-        bx0, by0, bx1, by1 = req.x, req.y, req.x + req.w, req.y + req.h
-        for k in path:
-            k["w"] = min(k["w"], req.w)
-            k["h"] = min(k["h"], req.h)
-            cx = min(max(k["x"] + k["w"] / 2.0, bx0), bx1)
-            cy = min(max(k["y"] + k["h"] / 2.0, by0), by1)
-            k["x"] = min(max(cx - k["w"] / 2.0, bx0), max(bx0, bx1 - k["w"]))
-            k["y"] = min(max(cy - k["h"] / 2.0, by0), max(by0, by1 - k["h"]))
-        return {"status": "ok", "fps": fps, "keyframes": path}
+        keys = _track_full_range(file_path, req)
+        # hard zone guarantee for every single key
+        fw_src, fh_src, _ = _probe_video_size(file_path)
+        for k in keys:
+            zone_px = _zone_at_time(req.zone, req.zone_keys, k["t"], fw_src, fh_src)
+            px, py, pw_f, ph_f = _clamp_box_into_zone(k["x"], k["y"], k["w"], k["h"], zone_px, fw_src, fh_src)
+            k["x"] = round(px / fw_src, 5); k["y"] = round(py / fh_src, 5)
+            k["w"] = round(pw_f / fw_src, 5); k["h"] = round(ph_f / fh_src, 5)
+        t_from = req.t_from
+        legacy = [{"t": round(k["t"] - t_from, 3), "x": k["x"], "y": k["y"],
+                   "w": k["w"], "h": k["h"]} for k in keys]
+        return {"status": "ok", "fps": (req.fps if req.fps and req.fps > 0 else req.sample_fps),
+                "mode": req.mode, "keys": keys, "keyframes": legacy}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка трекинга: {str(e)}")
-    finally:
-        shutil.rmtree(frames_dir, ignore_errors=True)
+
+# ── Manual pipeline helpers: editing proxy + waveform display (PLAN §7.1) ──
+class ProxyRequest(BaseModel):
+    filename: str
+
+PROXIES_DIR = os.path.join(DOWNLOADS_DIR, ".proxies")
+
+@app.post("/api/proxy")
+def make_proxy(req: ProxyRequest):
+    """960x540 GOP-10 proxy for instant scrubbing; export always uses the original."""
+    base_name = os.path.basename(req.filename)
+    src = os.path.join(DOWNLOADS_DIR, base_name)
+    if not os.path.exists(src):
+        if os.path.exists(req.filename):
+            src = req.filename
+        else:
+            raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
+    os.makedirs(PROXIES_DIR, exist_ok=True)
+    out = os.path.join(PROXIES_DIR, os.path.splitext(base_name)[0] + "_proxy.mp4")
+    if os.path.exists(out) and os.path.getsize(out) > 44:
+        return {"status": "ok", "proxy": os.path.basename(out), "cached": True}
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", src,
+           "-vf", "scale=960:-2:flags=lanczos", "-r", None, "-g", "10",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+           "-an", "-movflags", "+faststart", out]
+    # keep native fps: drop the "-r None" placeholder
+    cmd = [c for c in cmd if c is not None]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=1800)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка создания прокси: {e}")
+    if res.returncode != 0 or not os.path.exists(out):
+        raise HTTPException(status_code=500, detail=f"Прокси не создан: {(res.stderr or '')[-300:]}")
+    return {"status": "ok", "proxy": os.path.basename(out), "cached": False}
+
+
+class WaveformRequest(BaseModel):
+    filename: str
+    start: float = 0.0
+    duration: float = 0.0
+    points: int = 600
+
+@app.post("/api/waveform")
+def waveform(req: WaveformRequest):
+    """RMS envelope for DISPLAY ONLY (no auto decisions, PLAN §0/§7.1)."""
+    base_name = os.path.basename(req.filename)
+    src = os.path.join(DOWNLOADS_DIR, base_name)
+    if not os.path.exists(src):
+        if os.path.exists(req.filename):
+            src = req.filename
+        else:
+            raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
+    n = max(50, min(4000, int(req.points or 600)))
+    af = f"aresample=8000,aformat=channel_layouts=mono"
+    cmd = ["ffmpeg", "-loglevel", "error", "-ss", str(max(0.0, req.start))]
+    if req.duration and req.duration > 0:
+        cmd.extend(["-t", str(req.duration)])
+    cmd.extend(["-i", src, "-map", "a:0?", "-f", "f32le", "-ac", "1", "-ar", "8000", "pipe:1"])
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
+        buf = res.stdout
+    except Exception:
+        buf = b""
+    if not buf:
+        return {"status": "ok", "points": [0.0] * n}
+    import numpy as _np
+    data = _np.frombuffer(buf[:len(buf) // 4 * 4], dtype=_np.float32)
+    if data.size == 0:
+        return {"status": "ok", "points": [0.0] * n}
+    chunks = _np.array_split(data, n)
+    rms = [float(_np.sqrt(_np.mean(c * c)) if c.size else 0.0) for c in chunks]
+    peak = max(max(rms), 1e-6)
+    rms = [round(r / peak, 4) for r in rms]
+    return {"status": "ok", "points": rms, "sr_points": n}
+
+
+# ── Channel presets: manual webcam/content/layout/style per channel (PLAN §9.4) ──
+PRESETS_DIR = os.path.join(BASE_DIR, "presets", "channels")
+
+class ChannelPresetRequest(BaseModel):
+    channel: str
+    preset: Dict[str, Any]
+
+@app.get("/api/presets/channel/{channel}")
+def get_channel_preset(channel: str):
+    path = os.path.join(PRESETS_DIR, sanitize_filename(channel) + ".json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Пресет канала не найден")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Не удалось прочитать пресет: {e}")
+
+@app.post("/api/presets/channel")
+def save_channel_preset(req: ChannelPresetRequest):
+    os.makedirs(PRESETS_DIR, exist_ok=True)
+    path = os.path.join(PRESETS_DIR, sanitize_filename(req.channel) + ".json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"channel": req.channel, "preset": req.preset}, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return {"status": "ok", "channel": req.channel}
 
 # ── Viral Shorts Template & Batch Exporter ───────────────────────────
 class ExportSegment(BaseModel):
@@ -1208,7 +1874,10 @@ class ExportClipItem(BaseModel):
     # track index of the TOPMOST text layer: FX on tracks ABOVE it burn over text
     text_z: Optional[int] = None
     # highlight long "hot" keywords in an accent color (viral style)
-    hot_words: bool = True
+    hot_words: bool = False
+    # H1: single source of subtitles — "timeline" (text_items) | "generated"
+    # (subtitles field) | "none". Unset + both present -> HTTP 422.
+    subtitle_mode: Optional[str] = None
     # Static cinematic frames (рамки) burned above FX, below subtitles (px)
     bar_top: int = 0
     bar_bottom: int = 0
@@ -1223,25 +1892,6 @@ def _probe_duration(path: str) -> Optional[float]:
         return float(r.stdout.strip()) if r.stdout.strip() else None
     except Exception:
         return None
-
-
-def _sfx_maybe_file(inputs: List[str], filter_parts: List[str], n_inputs: int,
-                    kind: str, gain: float, at_ms: int, tag: str) -> Optional[int]:
-    """Real recorded SFX (./sfx) when available; returns the new input count,
-    or None so the caller falls back to the synthesized chain."""
-    fn = SFX_FILES.get(kind)
-    if not fn:
-        return None
-    path = os.path.join(SFX_DIR, fn)
-    if not os.path.exists(path):
-        return None
-    g = max(0.0, min(3.0, gain))
-    inputs.extend(["-i", path])
-    filter_parts.append(
-        f"[{n_inputs}:a]aresample=48000,aformat=channel_layouts=stereo,"
-        f"volume={g:.2f},adelay={at_ms}|{at_ms}[{tag}]"
-    )
-    return n_inputs + 1
 
 
 def _downsample_track_path(path: List[Dict[str, Any]], max_points: int = 18) -> List[Dict[str, Any]]:
@@ -1548,10 +2198,44 @@ def _text_has_cyrillic(subtitles: List[Dict[str, Any]]) -> bool:
                 return True
     return False
 
+def _font_cmap_supports_cyrillic(ttf_name: str) -> bool:
+    """H3: real cmap check (U+0410-U+044F, U+0401, U+0451) via fontTools."""
+    try:
+        from fontTools.ttLib import TTFont
+        path = os.path.join(FONTS_DIR, ttf_name)
+        if not os.path.exists(path):
+            return False
+        font = TTFont(path, fontNumber=0, lazy=True)
+        cmap = font.getBestCmap()
+        required = [0x0410, 0x042D, 0x044F, 0x0451, 0x0401, 0x0416]  # А Э я ё Ё ж
+        return all(cp in cmap for cp in required)
+    except Exception:
+        return False
+
+
+def _build_cyr_capable_fonts() -> set:
+    ok = set()
+    for fam, fn in _FONT_FILE_FOR.items():
+        if _font_cmap_supports_cyrillic(fn):
+            ok.add(fam)
+    return ok
+
+
+_CYR_CAPABLE = None
+
 def _resolve_font(font: str, has_cyr: bool) -> str:
+    """Fall back for non-Cyrillic faces; backed by real cmap checks (H3)."""
+    global _CYR_CAPABLE
     font = font if font in TV_SUB_FONTS else "Montserrat ExtraBold"
-    if has_cyr and font in FONT_NO_CYR:
-        return CYR_FALLBACK.get(font, "Montserrat ExtraBold")
+    if not has_cyr:
+        return font
+    if _CYR_CAPABLE is None:
+        _CYR_CAPABLE = _build_cyr_capable_fonts()
+    if font in _CYR_CAPABLE:
+        return font
+    for cand in (CYR_FALLBACK.get(font), "Montserrat ExtraBold", "Russo One"):
+        if cand and cand in TV_SUB_FONTS and cand in _CYR_CAPABLE:
+            return cand
     return font
 
 
@@ -1669,6 +2353,13 @@ def _tv_sub_opts(subtitle_template: str, clip, subtitles=None) -> dict:
 def _is_hot_word(word: str) -> bool:
     clean = "".join(ch for ch in str(word) if ch.isalnum())
     return len(clean) >= 5
+
+def _ass_escape(s: str) -> str:
+    """N18: keep user text out of ASS override syntax.
+    Backslash has no literal escape in ASS text (rendered as '/' here),
+    braces use the libass \\{ \\} escapes."""
+    s = str(s).replace("\\", "/")
+    return s.replace("{", "\\{").replace("}", "\\}")
 
 def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int, margin_v: int,
                            font: str = "Montserrat ExtraBold", size_mul: float = 1.0,
@@ -1861,33 +2552,33 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
                 for si in range(1, 5):
                     off = si * 2
                     tag_sh = f"{{\\an5\\frz{tilt}\\pos({cx+off},{base_y+off}){pop_tag}}}"
-                    lines.append(f"Dialogue: {si-1},{ts},{te},Shadow3D_{wsid},,0,0,0,,{tag_sh}{wt}")
+                    lines.append(f"Dialogue: {si-1},{ts},{te},Shadow3D_{wsid},,0,0,0,,{tag_sh}{_ass_escape(wt)}")
                 tag_m = f"{{\\an5\\frz{tilt}\\pos({cx},{base_y})\\fad(20,{out_fade}){col_tag}{pop_tag}}}"
-                lines.append(f"Dialogue: 4,{ts},{te},Main_{wsid},,0,0,0,,{tag_m}{wt}")
+                lines.append(f"Dialogue: 4,{ts},{te},Main_{wsid},,0,0,0,,{tag_m}{_ass_escape(wt)}")
 
             # 2. Cyber Glitch
             elif cur_cfg.get("is_glitch"):
                 j_tag = "\\t(0,60,\\frz1\\fscx104\\fscy104)\\t(60,120,\\frz-1\\fscx100\\fscy100)\\t(120,180,\\frz0)"
-                lines.append(f"Dialogue: 0,{ts},{te},GlitchMag_{wsid},,0,0,0,,{{\\an5\\blur1.5\\pos({cx+5},{base_y}){j_tag}}}{wt}")
-                lines.append(f"Dialogue: 1,{ts},{te},GlitchCyan_{wsid},,0,0,0,,{{\\an5\\blur1.5\\pos({cx-5},{base_y}){j_tag}}}{wt}")
-                lines.append(f"Dialogue: 2,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y}){j_tag}\\fad(15,{out_fade})}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},GlitchMag_{wsid},,0,0,0,,{{\\an5\\blur1.5\\pos({cx+5},{base_y}){j_tag}}}{_ass_escape(wt)}")
+                lines.append(f"Dialogue: 1,{ts},{te},GlitchCyan_{wsid},,0,0,0,,{{\\an5\\blur1.5\\pos({cx-5},{base_y}){j_tag}}}{_ass_escape(wt)}")
+                lines.append(f"Dialogue: 2,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y}){j_tag}\\fad(15,{out_fade})}}{_ass_escape(wt)}")
 
             # 3. Comic Pop-Art
             elif wsid == "comic_pop":
                 tilt = cur_cfg.get("tilt", -6)
                 cpop_tag = f"\\frz{tilt}\\fscx112\\fscy112\\t(0,90,\\fscx95\\fscy122)\\t(90,170,\\fscx100\\fscy100)"
-                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y})\\fad(20,{out_fade}){cpop_tag}}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y})\\fad(20,{out_fade}){cpop_tag}}}{_ass_escape(wt)}")
 
             # 4. Golden Luxury
             elif wsid == "golden_luxury":
-                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur16\\fsp4{pos_tag}\\fad(40,{out_fade}){pop_tag}}}{wt}")
-                lines.append(f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\fsp4{pos_tag}\\fad(40,{out_fade}){pop_tag}}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur16\\fsp4{pos_tag}\\alpha&HFF&\\t(60,160,\\alpha&H60&){pop_tag}}}{_ass_escape(wt)}")
+                lines.append(f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\fsp4{pos_tag}\\fad(40,{out_fade}){pop_tag}}}{_ass_escape(wt)}")
 
             # 5. Rage Red
             elif wsid == "rage_red":
                 slam = "\\fscx140\\fscy140\\t(0,80,\\fscx100\\fscy100)\\t(80,140,\\frz2.5)\\t(140,200,\\frz-2)\\t(200,260,\\frz0)"
-                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur20\\pos({cx},{base_y}){slam}}}{wt}")
-                lines.append(f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y}){slam}\\fad(10,{out_fade})}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur20\\pos({cx},{base_y})\\alpha&HFF&\\t(60,180,\\alpha&H60&){slam}}}{_ass_escape(wt)}")
+                lines.append(f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y}){slam}\\fad(10,{out_fade})}}{_ass_escape(wt)}")
 
             # 6. Pill Boxes (Hormozi / Clean Editorial)
             elif cur_cfg.get("is_box"):
@@ -1897,11 +2588,11 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
                     col_tag = f"\\1c{hot_col[2:]}&"
                 else:
                     col_tag = ""
-                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5{pos_tag}\\fad(25,{out_fade}){col_tag}{pop_tag}}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5{pos_tag}\\fad(25,{out_fade}){col_tag}{pop_tag}}}{_ass_escape(wt)}")
 
             # 7. Spotlight Pulse
             elif cur_cfg.get("is_spotlight"):
-                lines.append(f"Dialogue: 0,{ts},{te},SpotActive_{wsid},,0,0,0,,{{\\an5{pos_tag}\\fad(20,{out_fade}){pop_tag}}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},SpotActive_{wsid},,0,0,0,,{{\\an5{pos_tag}\\fad(20,{out_fade}){pop_tag}}}{_ass_escape(wt)}")
 
             # 8. Standard Glowing TV styles (Acid / Phonk / Sunset / Lime / Cyan, etc.)
             else:
@@ -1917,23 +2608,25 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
                     # Always keep crisp dark border and shadow for readability - never bord0!
                     bord_tag = f"\\bord{max(3.2, base_fontsize * 0.065):.1f}\\3c&H000000&\\shad{max(2.0, base_fontsize * 0.038):.1f}\\4c&H000000&\\4a&H60&"
 
-                core_b = max(3, int(base_fontsize * 0.05 * gk))
-                wide_b = max(8, int(base_fontsize * 0.14 * gk))
+                core_b = max(2, min(int(base_fontsize * 0.025 * gk), int(base_fontsize * 0.04)))
+                wide_b = max(6, min(int(base_fontsize * 0.05 * gk), int(base_fontsize * 0.08)))
 
+                # H4: glow never appears before the text — starts fully transparent
+                # and only breathes in at 50-160 ms; radii capped (≤0.08/0.04 · size).
                 # Ambient soft glow (bottom layer)
                 lines.append(
                     f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,"
-                    f"{{\\an5{pos_tag}\\blur{wide_b}\\bord{core_b}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\1a&HA0&\\3a&HA0&{pop_tag}}}{wt}"
+                    f"{{\\an5{pos_tag}\\blur{wide_b}\\bord{core_b}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\alpha&HFF&\\t(60,160,\\alpha&H80&){pop_tag}}}{_ass_escape(wt)}"
                 )
                 # Tight intense glow (middle layer)
                 lines.append(
                     f"Dialogue: 1,{ts},{te},Glow_{wsid},,0,0,0,,"
-                    f"{{\\an5{pos_tag}\\blur{core_b}\\bord{max(2, core_b//2)}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\1a&H50&\\3a&H50&{pop_tag}}}{wt}"
+                    f"{{\\an5{pos_tag}\\blur{core_b}\\bord{max(2, core_b//2)}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\alpha&HFF&\\t(50,140,\\alpha&H60&){pop_tag}}}{_ass_escape(wt)}"
                 )
                 # Main text with crisp dark outline and shadow (top layer)
                 lines.append(
                     f"Dialogue: 2,{ts},{te},Main_{wsid},,0,0,0,,"
-                    f"{{\\an5{pos_tag}\\fad(15,{out_fade}){bord_tag}{col_tag}{pop_tag}}}{wt}"
+                    f"{{\\an5{pos_tag}\\fad(15,{out_fade}){bord_tag}{col_tag}{pop_tag}}}{_ass_escape(wt)}"
                 )
 
     return "\n".join(lines)
@@ -2020,16 +2713,21 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
             continue
         if te <= ts:
             continue
-        text = str(ti.get("text", "")).replace("\n", "\\N").strip()
-        if not text:
+        # N18/N4: escape user text; newlines become real \N line tokens (never
+        # rendered as the letter "N"). Lines are laid out one Dialogue per line,
+        # so kerning is preserved and \N is never treated as a glyph.
+        raw_text = str(ti.get("text", "")).replace("\r", "").strip()
+        if not raw_text:
             continue
+        raw_lines = raw_text.split("\n")
+        text = "\\N".join(_ass_escape(ln) for ln in raw_lines)
         fam = ti.get("font") if ti.get("font") in TV_SUB_FONTS else "Montserrat ExtraBold"
-        fam = _resolve_font(fam, _text_has_cyrillic([{"text": text}]))
+        fam = _resolve_font(fam, _text_has_cyrillic([{"text": raw_text}]))
         try:
             size = max(18, int(float(ti.get("size", out_h * 0.055))))
         except (TypeError, ValueError):
             size = int(out_h * 0.055)
-        plain = text.replace("\\N", " ")
+        plain = raw_text.replace("\n", " ")
         if plain.strip():
             total_w = sum(_letter_widths(fam, size, plain))
             if total_w > out_w * 0.92:
@@ -2040,8 +2738,9 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
             stroke = 0.0
         if stroke <= 0:
             stroke = max(3.5, size * 0.065)
+        # H2: letter spacing default 0, capped at 6 px
         try:
-            spacing = max(-4.0, min(30.0, float(ti.get("spacing", 0) or 0)))
+            spacing = max(-2.0, min(6.0, float(ti.get("spacing", 0) or 0)))
         except (TypeError, ValueError):
             spacing = 0.0
         stroke_tag = "\\bord" + f"{stroke:.1f}"
@@ -2063,22 +2762,18 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
 
         style = f"TXT_{fam.replace(' ', '_')}_{size}"
         px, py = fx * out_w, fy * out_h
-        nph = max(2, min(6, dur_ms // 350))
-        seg = dur_ms // nph
+        line_h = int(size * 1.18)
 
-        # Clean sway breathing
+        # N6: glow breathing (gb_osc) removed; N2: sway is an opt-in that applies
+        # the SAME transform to every layer of the element (text/shadow/glow).
         sway = ""
-        for k in range(nph):
-            t0, t1 = k * seg, (k + 1) * seg
-            rz = 1.0 if k % 2 == 0 else -1.0
-            sway += f"\\t({t0},{t1},\\frz{rz:.1f})"
-
-        # Clean glow breathing
-        gb_osc = ""
-        for k in range(nph):
-            t0, t1 = k * seg, (k + 1) * seg
-            gbv = size * 0.26 * (glow / 60.0) * (1.2 if k % 2 == 0 else 0.8)
-            gb_osc += f"\\t({t0},{t1},\\blur{max(1.0, gbv):.1f})"
+        if ti.get("sway"):
+            nph = max(2, min(6, dur_ms // 350))
+            seg = dur_ms // nph
+            for k in range(nph):
+                t0, t1 = k * seg, (k + 1) * seg
+                rz = 1.0 if k % 2 == 0 else -1.0
+                sway += f"\\t({t0},{t1},\\frz{rz:.1f})"
 
         in_map = {
             "none": f"\\fad({in_ms if anim_in != 'none' else 0},0)",
@@ -2089,7 +2784,8 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
             "slide_r": f"\\fad({int(in_ms*0.6)},0)\\move({px+out_w*0.2:.0f},{py:.0f},{px:.0f},{py:.0f},0,{in_ms})",
             "wave": f"\\fad({in_ms},0)\\fscx60\\fscy60\\t(0,{in_ms},\\fscx112\\fscy112)\\t({in_ms},{in_ms+100},\\fscx100\\fscy100)",
             "bounce": f"\\fad({int(in_ms*0.5)},0)\\move({px:.0f},{py-size*1.8:.0f},{px:.0f},{py:.0f},0,{in_ms})\\frz6\\t({in_ms},{in_ms+180},\\frz0)",
-            "zoom": f"\\fad({int(in_ms*0.4)},0)\\fscx200\\fscy200\\blur6\\t(0,{in_ms+90},\\fscx100\\fscy100\\blur0.8)",
+            # N5: zoom must end at \blur0, not stay soft for the whole life
+            "zoom": f"\\fad({int(in_ms*0.4)},0)\\fscx200\\fscy200\\blur6\\t(0,{in_ms+90},\\fscx100\\fscy100\\blur0)",
         }
         in_tag = in_map.get(anim_in, in_map["pop"])
 
@@ -2105,48 +2801,66 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
         }
         out_tag = out_map.get(anim_out, out_map["fade"])
 
+        # N7: shake = element rotation/offset only, never \fsp (no breathing width)
         shake_tag = ""
         if shake:
-            shake_tag = ("\\t(0,%d,\\frz1.8\\fsp0.5)\\t(%d,%d,\\frz-1.6\\fsp-0.3)"
-                         % (dur_ms // 3, dur_ms // 3, 2 * dur_ms // 3))
+            shake_tag = ("\\t(0,%d,\\frz1.8)\\t(%d,%d,\\frz-1.6)\\t(%d,%d,\\frz0)"
+                         % (dur_ms // 3, dur_ms // 3, 2 * dur_ms // 3, 2 * dur_ms // 3, dur_ms))
 
-        gb1 = max(8, int(size * 0.16 * (glow / 60.0)))
-        gb2 = max(4, int(size * 0.08 * (glow / 60.0)))
+        # H4: glow radii capped (wide ≤ 0.10·size, core ≤ 0.05·size)
+        gb1 = max(6, min(int(size * 0.16 * (glow / 60.0)), int(size * 0.10)))
+        gb2 = max(3, min(int(size * 0.08 * (glow / 60.0)), int(size * 0.05)))
         sh_off = max(3, int(size * 0.055))
         sh_bord = max(2, int(size * 0.05))
 
         uses_move = anim_in in ("rise", "slide", "slide_r", "bounce")
         pos_tag = "" if uses_move else f"\\pos({px:.0f},{py:.0f})"
 
-        if anim_in == "type" and 1 < len(text.replace("\\N", "")) <= 50:
-            per = max(30, min(90, (dur_ms - 200) // len(text)))
-            xs = _letter_positions(fam, size, text.replace("\\N", " "), out_w, spacing)
-            xi = 0
-            for i, ch in enumerate(text):
-                if ch == "\\":
+        # N1: shadow is offset by (sh_off, sh_off); N2: one transform set for all layers
+        shadow_pos = f"\\pos({px + sh_off:.0f},{py + sh_off:.0f})"
+        shadow_anim = f"\\an5{shadow_pos}{out_tag}{shake_tag}{fsp_tag}"
+
+        t_start_s = fmt_ass_time(ts)
+        t_end_s = fmt_ass_time(te)
+        base_layers_out = out_tag  # N3: out window is relative to the line start == element start
+
+        if anim_in == "type" and 0 < len(plain) <= 80:
+            # H2: typewriter prints ONE Dialogue per line. Each glyph is rendered
+            # from the start (layout/kerning stable) but hidden with \alpha&HFF&
+            # and revealed by \t at its own time. No per-glyph \pos.
+            per = 38  # ms per grapheme (PLAN §12.6 char_type)
+            gi = 0
+            n_lines = len(raw_lines)
+            for li, ln in enumerate(raw_lines):
+                if not ln:
+                    gi += 0
                     continue
-                cur_x = xs[xi] if xi < len(xs) else out_w / 2.0
-                xi += 1
-                ls = ts + i * per / 1000.0
-                if ls >= te - 0.04:
-                    break
-                cpos = f"\\pos({cur_x:.0f},{py:.0f})"
-                anim_base = f"\\an5\\fad(15,{out_ms if anim_out != 'none' else 0}){cpos}{fsp_tag}\\fscx120\\fscy120\\t(0,70,\\fscx100\\fscy100){shake_tag}{out_tag}"
-                t_start_s = fmt_ass_time(ls)
+                esc_ln = _ass_escape(ln)
+                hidden = ""
+                g_hidden = ""
+                for ch in ln:
+                    t0 = gi * per
+                    t1 = t0 + 50
+                    hidden += f"{{\\alpha&HFF&\\t({t0},{t1},\\alpha&H00&)}}"
+                    g_hidden += f"{{\\alpha&HFF&\\t({t0 + 40},{t1 + 80},\\alpha&H80&)}}"
+                    gi += 1
+                line_y = py + (li - (n_lines - 1) / 2.0) * line_h
+                line_pos = f"\\pos({px:.0f},{line_y:.0f})"
+                shadow_pos_line = f"\\pos({px + sh_off:.0f},{line_y + sh_off:.0f})"
+                t_start_s = fmt_ass_time(ts)
                 t_end_s = fmt_ass_time(te)
                 if glow > 5:
-                    lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}\\3a&H80&\\1a&H80&}}{ch}")
-                    lines.append(f"Dialogue: 2,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb2}\\blur{gb2}\\3c{glow_color}\\1c{glow_color}\\3a&H40&\\1a&H40&}}{ch}")
-                lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5\\pos({cur_x+sh_off:.0f},{py+sh_off:.0f}){fsp_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H40&\\1a&H40&\\fscx120\\fscy120\\t(0,70,\\fscx100\\fscy100){shake_tag}{out_tag}}}{ch}")
-                lines.append(f"Dialogue: 4,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}{stroke_tag}\\3c&H00000000&\\1c{color}}}{ch}")
+                    lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5{line_pos}{fsp_tag}\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}{base_layers_out}{shake_tag}{sway}}}" + g_hidden + esc_ln)
+                    lines.append(f"Dialogue: 2,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5{line_pos}{fsp_tag}\\bord{gb2}\\blur{gb2}\\3c{glow_color}\\1c{glow_color}\\alpha&HFF&\\t(40,110,\\alpha&H40&){base_layers_out}{shake_tag}{sway}}}" + hidden + esc_ln)
+                lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5{shadow_pos_line}{fsp_tag}{base_layers_out}{shake_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H40&\\1a&H40&{sway}}}" + hidden + esc_ln)
+                lines.append(f"Dialogue: 4,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5{line_pos}{fsp_tag}\\fscx118\\fscy118\\t(0,70,\\fscx100\\fscy100){stroke_tag}\\3c&H00000000&\\1c{color}{base_layers_out}{shake_tag}{sway}}}" + hidden + esc_ln)
         else:
             anim_base = f"\\an5{pos_tag}{in_tag}{out_tag}{shake_tag}{fsp_tag}"
-            t_start_s = fmt_ass_time(ts)
-            t_end_s = fmt_ass_time(te)
             if glow > 5:
-                lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}\\3a&H80&\\1a&H80&{gb_osc}{sway}}}{text}")
-                lines.append(f"Dialogue: 2,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb2}\\blur{gb2}\\3c{glow_color}\\1c{glow_color}\\3a&H40&\\1a&H40&{gb_osc}{sway}}}{text}")
-            lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5{pos_tag}{in_tag}{out_tag}{shake_tag}{fsp_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H40&\\1a&H40&}}{text}")
+                # H4: glow starts fully transparent, breathes in after the text lands
+                lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}\\alpha&HFF&\\t({int(in_ms*0.5)+40},{int(in_ms*0.5)+140},\\alpha&H80&){sway}}}{text}")
+                lines.append(f"Dialogue: 2,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb2}\\blur{gb2}\\3c{glow_color}\\1c{glow_color}\\alpha&HFF&\\t({int(in_ms*0.5)+30},{int(in_ms*0.5)+120},\\alpha&H40&){sway}}}{text}")
+            lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{{shadow_anim}{in_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H40&\\1a&H40&{sway}}}{text}")
             lines.append(f"Dialogue: 4,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}{stroke_tag}\\3c&H00000000&\\1c{color}{sway}}}{text}")
     return "\n".join(lines)
 
@@ -2160,24 +2874,26 @@ def _source_has_audio(path: str) -> bool:
         )
         return bool(r.stdout.strip())
     except Exception:
-        return True
+        return False  # N18: fail closed -> caller synthesizes anullsrc
 
 
 def _tv_grade_parts(src: str, dst: str, is_vertical: bool = True) -> List[str]:
-    """Viral grade: clean denoise + professional DaVinci tetrahedral 3D LUT + subtle CAS sharpen.
-    Eliminates pulsing brightness, milky bloom, and harsh double unsharp artifacting."""
+    """H6/N8: grade chain ordered for WYSIWYG parity.
+    setparams(BT.709) -> own 65^3 LUT (trilinear) -> cas at output res ->
+    format=gbrp (text is burned in RGB afterwards; the FINAL yuv420p
+    quantization with BT.709 matrix happens once, after all overlays).
+    No hqdn3d (smearing source of the old graph), no eq (baked into the LUT)."""
     lut_path = os.path.join(BASE_DIR, "tv_grade.cube")
     if os.path.exists(lut_path):
         esc_lut = lut_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-        lut_filter = f"lut3d=file='{esc_lut}':interp=tetrahedral,"
+        lut_filter = f"lut3d=file='{esc_lut}':interp=trilinear,"
     else:
         lut_filter = "curves=m='0/0 0.25/0.22 0.5/0.52 0.75/0.78 1/1',"
     chain = (
-        "hqdn3d=1.2:1.2:5:5,"
+        "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709,"
         f"{lut_filter}"
-        "eq=contrast=1.05:saturation=1.10:brightness=0.01,"
         "cas=0.30,"
-        "format=yuv420p"
+        "format=gbrp"
     )
     return [f"{src}{chain}{dst}"]
 
@@ -2198,17 +2914,21 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
         d = e0 - s0
         en = f"'between(t,{s0:.3f},{e0:.3f})'"
         if fx.kind == "shake":
+            # N11: crop/scale geometry is applied CONSTANTLY (no enable) with an
+            # amplitude envelope — output size never changes, so there is no
+            # zoom pop at the enable boundaries.
             a = max(2, min(40, int(fx.amp or 10)))
             fq = max(2.0, min(15.0, float(fx.freq or 7.0)))
+            env = f"min(1\\,max(0\\,min(t-{s0:.3f}\\,{e0:.3f}-t)/0.1))"
             filter_parts.append(
                 f"{curr_v}split=2[{tag_prefix}v{fi}a][{tag_prefix}v{fi}b]"
             )
             filter_parts.append(
                 f"[{tag_prefix}v{fi}b]crop=iw-{2*a}:ih-{2*a}:"
-                f"x='{a}+{a}*sin(2*PI*{fq:.1f}*t)':y='{a}+{a}*cos(2*PI*{fq*9/7:.1f}*t)',"
+                f"x='{a}+{a}*sin(2*PI*{fq:.1f}*t)*{env}':y='{a}+{a}*cos(2*PI*{fq*9/7:.1f}*t)*{env}',"
                 f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}s]"
             )
-            filter_parts.append(f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
+            filter_parts.append(f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
         elif fx.kind == "bars":
             bh = max(20, min(out_h // 3, int(fx.bar_h or 120)))
@@ -2234,7 +2954,7 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
                 f"[{tag_prefix}m{fi}][{tag_prefix}c{fi}b]overlay=x=0:y='{out_h}-{bh}*{prog}+{sh_y}':enable={en}[{tag_prefix}v{fi}]"
             )
             curr_v = f"[{tag_prefix}v{fi}]"
-        else:  # flash: punchy fast attack, addition/exposure mode
+        else:  # flash
             peak = max(0.2, min(1.0, float(fx.peak or 0.85)))
             f_in = min(0.04, d * 0.15)
             f_out = max(0.08, d - f_in)
@@ -2248,14 +2968,20 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
                 )
                 filter_parts.append(f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}g]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
             else:
+                # N10: screen blend in RGB against a clip-length source (no
+                # full-length addition of U/V — no clipping, no colour shift).
                 cmap = {"white": "white", "green": "0x39FF00", "red": "0xFF2222"}.get(fx.color or "white", "white")
                 filter_parts.append(
-                    f"color=c={cmap}:s={out_w}x{out_h}:d={total_dur:.3f},format=rgba,"
-                    f"fade=t=in:st={s0:.3f}:d={f_in:.3f}:alpha=1,"
-                    f"fade=t=out:st={s0+f_in:.3f}:d={f_out:.3f}:alpha=1,"
-                    f"colorchannelmixer=aa={peak:g}[{tag_prefix}c{fi}]"
+                    f"color=c={cmap}:s={out_w}x{out_h}:d={d:.3f},format=rgba,"
+                    f"fade=t=in:st=0:d={f_in:.3f}:alpha=1,"
+                    f"fade=t=out:st={f_in:.3f}:d={f_out:.3f}:alpha=1,"
+                    f"colorchannelmixer=aa={peak:g},"
+                    f"setpts=PTS+{s0:.3f}/TB[{tag_prefix}c{fi}]"
                 )
-                filter_parts.append(f"{curr_v}[{tag_prefix}c{fi}]blend=all_mode=addition:enable={en}[{tag_prefix}v{fi}]")
+                filter_parts.append(f"{curr_v}format=gbrp[{tag_prefix}v{fi}rgb]")
+                filter_parts.append(
+                    f"[{tag_prefix}v{fi}rgb][{tag_prefix}c{fi}]blend=all_mode=screen:all_opacity=1:enable={en}[{tag_prefix}v{fi}]"
+                )
             curr_v = f"[{tag_prefix}v{fi}]"
     return curr_v
 
@@ -2340,6 +3066,40 @@ def _remap_subtitles_for_segments(subtitles, segments, seg_out_starts, seg_lens)
     return out
 
 
+def _two_pass_loudnorm(src_wav: str, dst_wav: str, target_i: float = -14.0,
+                       target_tp: float = -1.0, target_lra: float = 11.0) -> bool:
+    """0b: two-pass loudnorm (measure then apply linearly) + true-peak limiter."""
+    try:
+        p1 = ["ffmpeg", "-y", "-loglevel", "info", "-i", src_wav,
+              "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json",
+              "-f", "null", "-"]
+        r1 = subprocess.run(p1, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=600)
+        measured = {}
+        if r1.stderr:
+            start = r1.stderr.rfind("{")
+            end = r1.stderr.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    measured = json.loads(r1.stderr[start:end + 1])
+                except Exception:
+                    measured = {}
+        if {"measured_I", "measured_TP", "measured_LRA", "measured_thresh"}.issubset(measured.keys()):
+            af = (f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+                  f":measured_I={measured['measured_I']}:measured_TP={measured['measured_TP']}"
+                  f":measured_LRA={measured['measured_LRA']}:measured_thresh={measured['measured_thresh']}"
+                  f":offset={measured.get('target_offset', 0.0) or 0.0}:linear=true,"
+                  "alimiter=limit=0.891:attack=5:release=50")
+        else:
+            af = (f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra},"
+                  "alimiter=limit=0.891:attack=5:release=50")
+        p2 = ["ffmpeg", "-y", "-loglevel", "error", "-i", src_wav, "-af", af,
+              "-ar", "48000", "-c:a", "pcm_s16le", dst_wav]
+        r2 = subprocess.run(p2, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=600)
+        return r2.returncode == 0 and os.path.exists(dst_wav) and os.path.getsize(dst_wav) > 44
+    except Exception:
+        return False
+
+
 def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: str, idx: int) -> Optional[Dict[str, Any]]:
     """Layered compositing export: every timeline video/image element renders
     in z-order (bottom first), FX elements apply at their track level only
@@ -2380,6 +3140,7 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
 
     inputs: List[str] = []
     filter_parts: List[str] = []
+    audio_parts: List[str] = []   # audio-only chain -> separate WAV pre-pass
     n_inputs = 0
     layer_audio: List[str] = []
 
@@ -2562,12 +3323,12 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
                     en = f":enable='between(t,{o_start:.3f},{o_end:.3f})'"
                 filter_parts.append(f"{comp}[ovlL{li}]overlay=x=0:y=0:format=auto{en}[eoL{li}]")
                 comp = f"[eoL{li}]"
-        # this layer's own audio into the mix
+        # this layer's own audio into the mix (audio-only pre-pass graph)
         if not L.muted and _source_has_audio(L.source_file):
             gain = max(0.0, min(3.0, float(L.volume if L.volume is not None else 1.0)))
             delay_ms = int(max(0.0, float(L.out_start or 0.0)) * 1000)
             dl = f",adelay={delay_ms}|{delay_ms}" if delay_ms > 0 else ""
-            filter_parts.append(f"[{src_i}:a]aresample=48000,aformat=channel_layouts=stereo,volume={gain}{dl}[la{li}]")
+            audio_parts.append(f"[{src_i}:a]aresample=48000,aformat=channel_layouts=stereo,volume={gain}{dl}[la{li}]")
             layer_audio.append(f"[la{li}]")
         # FX that live on this z level (below text) burn onto the composite
         fx_here = [fx for fx in fx_normal if (fx.z or 0) == (L.z or 0)]
@@ -2662,6 +3423,13 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
     if fx_over_text:
         comp = _apply_fx_chain(filter_parts, comp, fx_over_text, out_w, out_h, total_dur, "otx_")
 
+    # N8/N9: exactly ONE final RGB->YUV quantization, with explicit BT.709
+    # matrix/range so text edges stay clean and preview == export.
+    filter_parts.append(
+        f"{comp}scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[vfinal]"
+    )
+    comp = "[vfinal]"
+
     # ── audio: layers' own audio + real SFX + synth fallback + timeline music ──
     def _sfx_chain(kind: str, gain: float, at_ms: int, tag: str) -> str:
         g = max(0.0, min(3.0, gain))
@@ -2691,6 +3459,7 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
         return (f"anoisesrc=d=0.16:c=white:r=48000:a=0.9,highpass=f=1500,"
                 f"afade=t=out:st=0.06:d=0.1,{dl},volume={g}[{tag}]")
 
+    # ── audio: built in a SEPARATE pass into WAV, then two-pass loudnorm (0b) ──
     mix_labels = list(layer_audio)
     for qi, snd in enumerate(clip.sounds or []):
         try:
@@ -2701,9 +3470,9 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
             at_ms = int(max(0.0, float(snd.at)) * 1000)
         except (TypeError, ValueError):
             continue
-        new_n = _sfx_maybe_file(inputs, filter_parts, n_inputs, kind, gain, at_ms, f"sfx{qi}")
+        new_n = _sfx_maybe_file(inputs, audio_parts, n_inputs, kind, gain, at_ms, f"sfx{qi}")
         if new_n is None:
-            filter_parts.append(_sfx_chain(kind, gain, at_ms, f"sfx{qi}"))
+            audio_parts.append(_sfx_chain(kind, gain, at_ms, f"sfx{qi}"))
         else:
             n_inputs = new_n
         mix_labels.append(f"[sfx{qi}]")
@@ -2726,7 +3495,7 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
         inputs.extend(in_args + ["-i", apath])
         n_inputs += 1
         mtag = f"mx{ai}"
-        filter_parts.append(
+        audio_parts.append(
             f"[{ain}:a]aresample=48000,aformat=channel_layouts=stereo,"
             f"volume={gain},adelay={place}|{place}[{mtag}raw]"
         )
@@ -2737,22 +3506,42 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
                 first = mix_labels[0]
                 base_lbl = first[1:-1]
                 _duck_split_done.add(first)
-                filter_parts.append(f"{first}asplit=2[{base_lbl}dk]{first}")
-                filter_parts.append(
+                audio_parts.append(f"{first}asplit=2[{base_lbl}dk]{first}")
+                audio_parts.append(
                     f"[{mtag}raw][{base_lbl}dk]sidechaincompress=threshold=0.02:ratio=9:"
                     f"attack=15:release=450[{mtag}]"
                 )
             else:
-                filter_parts.append(f"[{mtag}raw]volume=0.55[{mtag}]")
+                audio_parts.append(f"[{mtag}raw]volume=0.55[{mtag}]")
         else:
-            filter_parts.append(f"[{mtag}raw]anull[{mtag}]")
+            audio_parts.append(f"[{mtag}raw]anull[{mtag}]")
         mix_labels.append(f"[{mtag}]")
 
+    wav_norm = None
     if mix_labels:
-        filter_parts.append(
-            "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0,apad=whole_dur={total_dur:.3f},loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
+        audio_parts.append(
+            "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0,"
+            f"apad=whole_dur={total_dur:.3f},aresample=48000:first_pts=0[amixraw]"
         )
-        audio_map = "[aout]"
+        wav_raw = os.path.join(DOWNLOADS_DIR, f"temp_audio_{idx}_{timestamp_str}.wav")
+        pre_cmd = ["ffmpeg", "-y", "-loglevel", "error"] + inputs + [
+            "-filter_complex", ";".join(audio_parts),
+            "-map", "[amixraw]", "-c:a", "pcm_s16le", "-ar", "48000", wav_raw,
+        ]
+        try:
+            pre_res = subprocess.run(pre_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=600)
+            pre_ok = pre_res.returncode == 0 and os.path.exists(wav_raw) and os.path.getsize(wav_raw) > 44
+        except Exception:
+            pre_ok = False
+        if pre_ok:
+            wav_norm = os.path.join(DOWNLOADS_DIR, f"temp_audio_norm_{idx}_{timestamp_str}.wav")
+            if not _two_pass_loudnorm(wav_raw, wav_norm):
+                wav_norm = wav_raw  # keep un-normalized mix rather than dropping audio
+
+    if wav_norm:
+        inputs.extend(["-i", wav_norm])
+        audio_map = f"{n_inputs}:a"
+        n_inputs += 1
     else:
         filter_parts.append(f"anullsrc=r=48000:cl=stereo:d={total_dur:.3f}[aout]")
         audio_map = "[aout]"
@@ -2780,7 +3569,7 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
         "-color_trc", "bt709",
         "-color_range", "tv",
         "-c:a", "aac",
-        "-b:a", "256k",
+        "-b:a", "320k",
         "-ar", "48000",
         "-movflags", "+faststart",
         "-map_metadata", "-1",
@@ -2818,7 +3607,37 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
                     os.remove(p)
                 except Exception:
                     pass
+        for p in (locals().get("wav_raw"), locals().get("wav_norm")):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
     return None
+
+
+def _normalize_subtitle_mode(clip) -> None:
+    """H1: one source of subtitles per clip. Raises 422 on an unresolved
+    conflict (ASR words in text_items AND non-empty subtitles, no mode)."""
+    mode = (getattr(clip, "subtitle_mode", None) or "").strip().lower() or None
+    if mode not in ("timeline", "generated", "none"):
+        mode = None
+    subs = getattr(clip, "subtitles", None) or []
+    items = getattr(clip, "text_items", None) or []
+    asr_items = [ti for ti in items if isinstance(ti, dict) and ti.get("words")]
+    if subs and asr_items and mode is None:
+        raise HTTPException(
+            status_code=422,
+            detail=("Конфликт источников субтитров: text_items содержат ASR-слова "
+                    "и одновременно заполнен subtitles. Укажи subtitle_mode "
+                    "(timeline|generated|none) или убери один из источников."))
+    if mode == "timeline":
+        clip.subtitles = []
+    elif mode == "generated":
+        clip.text_items = [ti for ti in items if not (isinstance(ti, dict) and ti.get("words"))]
+    elif mode == "none":
+        clip.subtitles = []
+        clip.text_items = [ti for ti in items if not (isinstance(ti, dict) and ti.get("words"))]
 
 
 @app.post("/api/export-pack")
@@ -2829,6 +3648,9 @@ def export_clip_pack(req: ExportPackRequest):
     """
     if not req.clips:
         raise HTTPException(status_code=400, detail="Список клипов для экспорта пуст")
+
+    for clip in req.clips:
+        _normalize_subtitle_mode(clip)
 
     results = []
     failed = []
@@ -3165,6 +3987,12 @@ def export_clip_pack(req: ExportPackRequest):
             filter_parts.append(f"{curr_v}[ovl_src]overlay=x='{x_full}':y='{y_full}':format=auto[ovl_out]")
             curr_v = "[ovl_out]"
 
+        # N8/N9: single final RGB->YUV quantization with explicit BT.709 matrix
+        filter_parts.append(
+            f"{curr_v}scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[vfinal]"
+        )
+        curr_v = "[vfinal]"
+
         # ── Audio map: main voice + synth SFX + timeline audio (music ducking, SFX) ──
         def _sfx_chain(kind: str, gain: float, at_ms: int, tag: str) -> str:
             g = max(0.0, min(3.0, gain))
@@ -3420,7 +4248,7 @@ def preview_frame(req: dict):
                 f.write(build_tv_subtitles_ass(settled, sid, W, H, margin_v,
                                                font=req.get("sub_font") or "Montserrat ExtraBold",
                                                size_mul=(req.get("sub_size") or 1.0), glow=75,
-                                               anim="pop", hot_words=bool(req.get("hot_words", True))))
+                                               anim="pop", hot_words=bool(req.get("hot_words", False))))
             esc_ass = ass_path.replace(chr(92), "/").replace(":", chr(92) + ":")
             esc_fonts = FONTS_DIR.replace(chr(92), "/").replace(":", chr(92) + ":")
             fp.append(f"{comp}subtitles=filename='{esc_ass}':fontsdir='{esc_fonts}'[subt]")
@@ -3438,6 +4266,10 @@ def preview_frame(req: dict):
             esc_t = text_ass_path.replace(chr(92), "/").replace(":", chr(92) + ":")
             fp.append(f"{comp}subtitles=filename='{esc_t}':fontsdir='{esc_fonts}'[ptxt]")
             comp = "[ptxt]"
+
+        # N8/N9: same final quantization as export (preview == export)
+        fp.append(f"{comp}scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[pvf]")
+        comp = "[pvf]"
 
         out_png = os.path.join(DOWNLOADS_DIR, f"temp_pvf_{int(time.time()*1000)}.png")
         cmd = ["ffmpeg", "-y", "-v", "error"] + inputs + [
