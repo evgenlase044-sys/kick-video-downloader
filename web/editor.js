@@ -45,6 +45,7 @@
             subtitles: [],              // list of segments with word timestamps
             pack: []                    // legacy, replaced by state.regions
         },
+        previewFps: 60,                 // §16.5: preview frame grid (±1/fps stepping)
         aspectRatio: "16:9",            // "16:9" or "9:16"
         previewStopAt: null             // auto-pause position for moment preview
     };
@@ -161,6 +162,7 @@
         initInspector();
         initClipperPanel();
         initMultiPreview();
+        initCanvasMonitor();
         initTimelineMarkers();
         initCutsTree();
         initTrackingUI();
@@ -236,10 +238,10 @@
                 }
             } else if (e.code === "ArrowLeft" || e.code === "Comma") {
                 if (state.isPlaying) pausePlayback();
-                seekRelative(e.shiftKey ? -1 : -1 / 30);
+                seekRelative(e.shiftKey ? -1 : -1 / (state.previewFps || 60));
             } else if (e.code === "ArrowRight" || e.code === "Period") {
                 if (state.isPlaying) pausePlayback();
-                seekRelative(e.shiftKey ? 1 : 1 / 30);
+                seekRelative(e.shiftKey ? 1 : 1 / (state.previewFps || 60));
             } else if (e.code === "Home") {
                 seekTo(0);
             } else if (e.code === "End") {
@@ -1761,6 +1763,90 @@
         }
         return out;
     }
+    // ── §16 P0: canvas monitor — ONE canvas over the monitor, ONE hidden
+    // <video> per unique file, master-clock sync, canvas text (no CSS anims),
+    // WebGL2 grade with the own 65^3 LUT. Active for the 9:16 Shorts view. ──
+    function initCanvasMonitor() {
+        if (!window.CoreCanvasMonitor || !videoMonitor || window.__canvasMonitor) return;
+        const canvas = document.createElement("canvas");
+        canvas.id = "studioCanvasMonitor";
+        videoMonitor.appendChild(canvas);
+        const hooks = {
+            settings() {
+                return {
+                    enabled: state.aspectRatio === "9:16",
+                    playing: state.isPlaying,
+                    fps: state.previewFps || 60,
+                    format: state.clipper.format,
+                    cropBox: state.clipper.cropBox,
+                    bgBox: state.clipper.bgBox,
+                    topRatio: 0.45,
+                    barTop: Math.max(0, Math.min(640, parseInt(state.clipper.barTop, 10) || 0)),
+                    barBottom: Math.max(0, Math.min(640, parseInt(state.clipper.barBottom, 10) || 0)),
+                    gradeOn: state.clipper.colorGrade === "tv"
+                };
+            },
+            videoClips(t) {
+                // ALL active video layers, topmost first — no cap of 2 (§16.5)
+                const out = [];
+                for (const tid of videoTrackIds()) {
+                    const clip = activeClipOn(tid, t);
+                    if (clip) out.push(clip);
+                }
+                return out;
+            },
+            targetTime(clip, t) { return clipTargetTime(clip, t); },
+            pipBoxFor(clip) { return pipForClip(clip); },
+            trackBoxFor(clip, t) {
+                return clip.trackPath && clip.trackPath.length ? trackPosAt(clip, t) : null;
+            },
+            cueAt(t) {
+                const clip = currentCueClip(t);
+                if (!clip) return null;
+                const raw = Array.isArray(clip.words) && clip.words.length
+                    ? clip.words
+                    : [{ word: clip.title || "", abs_start: clip.startTime, abs_end: clip.startTime + clip.duration }];
+                const first = raw.length ? (raw[0].abs_start != null ? raw[0].abs_start : 0) : 0;
+                const words = raw.map(w => ({
+                    word: w.word || "",
+                    s: Math.max(0, (w.abs_start != null ? w.abs_start : first) - first),
+                    e: Math.max(0.05, (w.abs_end != null ? w.abs_end : (w.abs_start || first) + 0.3) - first),
+                    hot: !!w.hot,
+                    color: w.color || null
+                }));
+                const isSplit = state.clipper.format === "split_adhd";
+                return {
+                    words: words,
+                    end: Math.max(0.2, clip.duration),
+                    styleName: clip.subtitleStyle || state.clipper.subtitleTemplate || "acid",
+                    x: clip.textX != null ? clip.textX : 0.5,
+                    y: clip.textY != null ? clip.textY : (isSplit ? 0.225 : 0.68),
+                    localT: Math.max(0, t - clip.startTime),
+                    sizeRatio: 0.058 * (state.clipper.subSize || 1.0) * (isSplit ? 0.9 : 1.0)
+                };
+            },
+            fxAt(t) {
+                const out = [];
+                for (const tid of videoTrackIds()) {
+                    for (const c of (state.tracks[tid] || [])) {
+                        if (!c.isFx) continue;
+                        out.push({
+                            kind: c.fxKind || "flash", color: c.fxColor || "white",
+                            peak: c.fxPeak != null ? c.fxPeak : 0.75,
+                            amp: c.fxAmp || 12, freq: c.fxFreq || 7,
+                            start: c.startTime, end: c.startTime + c.duration
+                        });
+                    }
+                }
+                return out;
+            },
+            now() { return state.currentTime; }
+        };
+        const mon = new window.CoreCanvasMonitor(canvas, hooks);
+        window.__canvasMonitor = mon;
+        mon.loadLut("/api/grade/lut").catch(() => {});
+    }
+
     function clipTargetTime(clip, t) {
         return Math.max(0, (clip.sourceOffset || 0) + (t - clip.startTime));
     }
@@ -1946,6 +2032,14 @@
             }
         });
         updateOverlayBadge();
+        // §16 P0: draw the composite on the canvas monitor; when it is active
+        // it takes over the Shorts preview entirely (updateTvPreview bails).
+        if (window.__canvasMonitor) {
+            const canvasActive = window.__canvasMonitor.renderAt(state.currentTime);
+            if (window.__canvasMonitor.canvas) {
+                window.__canvasMonitor.canvas.classList.toggle("active", !!canvasActive);
+            }
+        }
         updateTvPreview();
     }
     function totalClipCount() {
@@ -3809,6 +3903,14 @@
         if (state.isPlaying) hideServerPreviewFrame();
         const tvp = document.getElementById("tvPreview");
         if (!tvp) return;
+        // §16 P0: the canvas monitor owns the Shorts preview — the DOM
+        // composite (#tvPreview) stays hidden while it is active.
+        if (window.__canvasMonitor && window.__canvasMonitor.enabled()) {
+            tvp.classList.add("hidden");
+            if (videoEl) videoEl.style.visibility = "";
+            if (overlayVideoEl) overlayVideoEl.style.visibility = "";
+            return;
+        }
         const want = tvPreviewWanted();
         const hideMain = !!want;
         if (videoEl) videoEl.style.visibility = hideMain ? "hidden" : "";
@@ -4372,7 +4474,8 @@
     function updateLiveSubtitleOverlay() {
         if (!subtitlesMonitorOverlay) return;
         // TV composite preview renders subtitles itself — keep the raw overlay empty
-        if (typeof tvPreviewWanted === "function" && tvPreviewWanted()) {
+        if ((typeof tvPreviewWanted === "function" && tvPreviewWanted()) ||
+            (window.__canvasMonitor && window.__canvasMonitor.enabled())) {
             subtitlesMonitorOverlay.innerHTML = "";
             return;
         }

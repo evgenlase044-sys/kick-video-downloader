@@ -453,7 +453,85 @@ def test_tracker():
     return ok
 
 
+# ────────────────────────────────────────────── §7.4 P0 preview gates ──
+def test_p0():
+    section("§7.4  P0 — canvas monitor, frame sync, text frame parity")
+    ok = True
+    # 1) pure core logic (runs in Node, no browser needed)
+    r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
+                       capture_output=True, text=True, timeout=120, cwd=BASE)
+    ok &= check(r.returncode == 0, "web/core selftest (frame grid, clock, spring, LUT)",
+                (r.stdout[-400:] + r.stderr[-200:]) if r.returncode else "")
+
+    # 2) §7.4: word appears in frame round(word.s*fps) ± 1 — cross-engine:
+    #    the ASS export start frame vs the canvas-preview visibility frame.
+    import server
+    cue = {"text": "ЭТОТ ДОНАТ", "start": 1.0, "end": 2.0, "style": "acid",
+           "words": [{"word": "ЭТОТ", "start": 1.0, "end": 1.5},
+                     {"word": "ДОНАТ", "start": 1.5, "end": 2.0}]}
+    ass = server.build_tv_subtitles_ass([cue], "acid", 1080, 1920, 200, glow=55,
+                                        anim="pop", hot_words=False)
+    m = re.search(r"Dialogue: 2,(\d+):(\d+):(\d+)\.(\d+),", ass)
+    if m:
+        h, mi, sec, cs = (int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)))
+        ass_start_s = h * 3600 + mi * 60 + sec + cs / 100.0
+        node_check = (
+            "const TM = require('./web/core/timeMap.js');"
+            "const s = %f;"
+            "const pv = TM.wordVisibleFrame(s, 60);"
+            "const ass = TM.wordAssStartFrame(%f, 60);"
+            "console.log(JSON.stringify({pv, ass, delta: Math.abs(pv - ass)}));"
+            % (1.0, ass_start_s)
+        )
+        r2 = subprocess.run(["node", "-e", node_check], capture_output=True, text=True,
+                            timeout=30, cwd=BASE)
+        ok &= check(r2.returncode == 0, "preview word-frame probe runs", r2.stderr[:200])
+        if r2.returncode == 0:
+            d = json.loads(r2.stdout.strip().splitlines()[-1])
+            ok &= check(d["delta"] <= 1, "text appears in frame round(word.s*fps) ±1 (preview == export)",
+                        json.dumps(d))
+    else:
+        ok &= check(False, "ASS dialogue start parsed")
+
+    # 3) static wiring of the canvas monitor (§16)
+    ed = read(os.path.join(BASE, "web", "editor.js"))
+    html = read(os.path.join(BASE, "web", "index.html"))
+    css = read(os.path.join(BASE, "web", "style.css"))
+    mon = read(os.path.join(BASE, "web", "core", "canvasMonitor.js"))
+    ok &= check("core/timeMap.js" in html and "core/canvasMonitor.js" in html
+                and "core/text/canvasText.js" in html, "core modules loaded in index.html")
+    ok &= check("__canvasMonitor.renderAt" in ed, "editor renders through the canvas monitor")
+    ok &= check("state.previewFps" in ed and "1 / (state.previewFps || 60)" in ed,
+                "frame stepping ±1/fps on the composition grid (§16.5)")
+    ok &= check('enabled: state.aspectRatio === "9:16"' in ed,
+                "canvas monitor active for the 9:16 Shorts view (§7.4 gate 1)")
+    ok &= check("videoPool = new Map()" in mon and "this.videoPool.set(name, el)" in mon,
+                "one hidden <video> per unique file (§16.2)")
+    ok &= check("sourceId: base.media.filename" in mon,
+                "split halves draw from the same decoded frame (§7.4 clap gate by construction)")
+    ok &= check("requestVideoFrameCallback" in mon, "rVFC redraw on pause/scrub (§16.3)")
+    ok &= check("clockCorrection" in mon and "0.97" in read(os.path.join(BASE, "web", "core", "timeMap.js")),
+                "master-clock follower 0.97/1.03 with seek >150ms (§16.3)")
+    ok &= check("format-card" in ed and 'state.aspectRatio = shortsFmt ? "9:16" : "16:9"' in ed,
+                "Shorts format switches monitor to 9:16 (§7.4 gate 1)")
+
+    # 4) CSS text animations removed (§16.4) — canvas text replaces them
+    gone = all(("@keyframes " + k) not in css for k in
+               ("popWord", "tvGlitch", "tvWave", "tvShimmer", "tvType", "tvTremble", "tvRise", "tvSpin"))
+    ok &= check(gone, "CSS text @keyframes removed (canvas text engine)")
+    ok &= check("cueAt" in ed, "subtitles drawn by web/core/text (canvas)")
+
+    # 5) grade LUT endpoint serves the own 65^3 cube (§16.6)
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    r3 = client.get("/api/grade/lut")
+    ok &= check(r3.status_code == 200 and b"LUT_3D_SIZE 65" in r3.content,
+                "/api/grade/lut serves the own 65^3 LUT for the WebGL2 pass")
+    return ok
+
+
 class _MockGroq(BaseHTTPRequestHandler):
+
     behavior = {"fail_429": 0, "requests": []}
 
     def log_message(self, *a):
@@ -590,6 +668,7 @@ def main():
     ok &= test_export_graph()
     ok &= test_tracker()
     ok &= test_groq_mock()
+    ok &= test_p0()
     dt = time.time() - t0
     print(f"\n{'=' * 64}")
     if FAILURES:

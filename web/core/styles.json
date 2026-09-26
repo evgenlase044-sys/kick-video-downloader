@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "styles": {
+    "viral_italic": {
+      "font": "Montserrat ExtraBold",
+      "weight": "900",
+      "italic": true,
+      "caps": true,
+      "color": "#FFFFFF",
+      "accent": "#FF2B2B",
+      "stroke": 0.07,
+      "strokeColor": "#000000",
+      "shadow": { "blur": 0.08, "offsetY": 0.06, "alpha": 0.65 },
+      "glow": 0.35,
+      "animatorIn": "word_pop_spring",
+      "animatorOut": "out_blur_fade"
+    },
+    "acid": {
+      "font": "Montserrat ExtraBold",
+      "weight": "900",
+      "caps": true,
+      "color": "#FFFFFF",
+      "accent": "#39FF14",
+      "stroke": 0.06,
+      "strokeColor": "#000000",
+      "shadow": { "blur": 0.07, "offsetY": 0.05, "alpha": 0.6 },
+      "glow": 0.45,
+      "glowColor": "#39FF14",
+      "animatorIn": "word_pop_spring",
+      "animatorOut": "out_blur_fade"
+    },
+    "splash_remark": {
+      "font": "Montserrat ExtraBold",
+      "weight": "900",
+      "caps": false,
+      "color": "#FFE600",
+      "accent": "#FFE600",
+      "stroke": 0.06,
+      "strokeColor": "#000000",
+      "glow": 0.5,
+      "glowColor": "#FFE600",
+      "animatorIn": "char_type",
+      "animatorOut": "out_blur_fade"
+    },
+    "mrbeast_3d": {
+      "font": "Montserrat ExtraBold",
+      "weight": "900",
+      "caps": true,
+      "color": "#FFFFFF",
+      "accent": "#00E6FF",
+      "stroke": 0.12,
+      "strokeColor": "#000000",
+      "extrude": 10,
+      "tilt": -4,
+      "animatorIn": "word_pop_spring",
+      "animatorOut": "out_blur_fade"
+    },
+    "nametag": {
+      "font": "Montserrat ExtraBold",
+      "weight": "800",
+      "caps": true,
+      "color": "#FFFFFF",
+      "accent": "#FF2A2A",
+      "stroke": 0.05,
+      "strokeColor": "#000000",
+      "bob": { "amp": 3, "freq": 1.2 },
+      "animatorIn": "none",
+      "animatorOut": "none"
+    }
+  },
+  "animators": {
+    "word_pop_spring": { "scaleFrom": 0.55, "overshoot": 0.18, "settleMs": 300, "opacityMs": 50, "blurFrom": 6, "blurMs": 90 },
+    "slam": { "scaleFrom": 2.2, "easeInMs": 120, "glowBoost": 2.0 },
+    "char_type": { "msPerGrapheme": 38, "scaleFrom": 1.3, "scaleMs": 90, "glowBoost": 2.0 },
+    "out_blur_fade": { "ms": 180, "blurTo": 10, "scaleTo": 0.94 },
+    "none": {}
+  }
+}

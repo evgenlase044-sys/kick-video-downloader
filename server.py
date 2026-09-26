@@ -1738,6 +1738,15 @@ def waveform(req: WaveformRequest):
     return {"status": "ok", "points": rms, "sr_points": n}
 
 
+@app.get("/api/grade/lut")
+def get_grade_lut():
+    """Own 65^3 grade LUT for the preview WebGL2 pass (PLAN §14.6/§16.6)."""
+    lut_path = os.path.join(BASE_DIR, "tv_grade.cube")
+    if not os.path.exists(lut_path):
+        raise HTTPException(status_code=404, detail="LUT не найден")
+    return FileResponse(lut_path, media_type="text/plain", filename="tv_grade.cube")
+
+
 # ── Channel presets: manual webcam/content/layout/style per channel (PLAN §9.4) ──
 PRESETS_DIR = os.path.join(BASE_DIR, "presets", "channels")
 
