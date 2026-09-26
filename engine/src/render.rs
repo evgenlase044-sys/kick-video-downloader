@@ -38,12 +38,14 @@ fn pop_scale(local: f64, pop_dur: f64) -> f32 {
     if local >= pop_dur {
         return 1.0;
     }
-    let p = (local / pop_dur) as f32;
-    // ease-out-back overshoot
-    let c1 = 1.70158;
-    let c3 = c1 + 1.0;
-    let v = 1.0 + c3 * (p - 1.0).powi(3) + c1 * (p - 1.0).powi(2);
-    v.max(0.0)
+    let t = (local / pop_dur) as f32;
+    // Physical spring simulation (stiffness=180, damping=20, zeta=0.74)
+    let w0 = 12.0f32;
+    let z = 0.74f32;
+    let wd = w0 * (1.0 - z * z).sqrt();
+    let env = (-z * w0 * t).exp();
+    let val = 1.0 - env * ((wd * t).cos() + (z * w0 / wd) * (wd * t).sin());
+    val.max(0.0)
 }
 
 fn wobble_offset(item: &TextItem, t: f64) -> (i64, i64) {
@@ -109,8 +111,8 @@ impl<'a> Renderer<'a> {
             frame.blur_darken(9.0, darken.clamp(0.0, 0.95));
         }
         frame.chromatic_shift(self.tpl.grade.ca_px * clip.ca_mult);
-        frame.unsharp(self.tpl.grade.sharpen);
         frame.grade(self.tpl.grade.contrast, self.tpl.grade.saturation, &tint);
+        frame.unsharp(self.tpl.grade.sharpen);
         frame.vignette(self.tpl.grade.vignette);
 
         // ── overlays ──

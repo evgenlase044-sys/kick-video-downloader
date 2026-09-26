@@ -317,6 +317,11 @@ impl<'a> TextDraw<'a> {
                 + (line.len().saturating_sub(1)) as f32 * space_w;
             let mut pen_x = (item.x * self.canvas_w as f32) - line_w / 2.0;
             for (wi, wpx) in line {
+                let ws = word_starts.get(*wi).copied().unwrap_or(0.0);
+                if (local as f32) < ws {
+                    pen_x += wpx + space_w;
+                    continue;
+                }
                 let text = words[*wi];
                 let color = colors[*wi % colors.len()];
                 let mut gx = pen_x;
@@ -330,36 +335,9 @@ impl<'a> TextDraw<'a> {
                     }
                     gx += sf.h_advance(gid) + tracking;
                 }
-                // word reveal mask handled below by zeroing alpha regions
-                let _ = wpx;
                 pen_x += wpx + space_w;
             }
             pen_y += line_h;
-        }
-
-        // Word reveal: zero alpha of words not yet shown
-        if word_starts.iter().any(|&s| s > 0.01) {
-            let total_w: f32 = words.iter().map(|w| measure(&sf, w, tracking)).sum::<f32>()
-                + (words.len().saturating_sub(1)) as f32 * space_w;
-            let mut x0 = (item.x * self.canvas_w as f32) - total_w / 2.0;
-            let y0 = (item.y * self.canvas_h as f32) - total_h / 2.0;
-            let y1 = y0 + total_h;
-            for (wi, w) in words.iter().enumerate() {
-                let wpx = measure(&sf, w, tracking);
-                let ws = word_starts.get(wi).copied().unwrap_or(0.0);
-                if (local as f32) < ws {
-                    let ax0 = (x0 - size_px * 0.05).max(0.0) as i64;
-                    let ax1 = (x0 + wpx + size_px * 0.05).min(layer.w as f32) as i64;
-                    for yy in (y0.max(0.0) as i64)..(y1.min(layer.h as f32) as i64) {
-                        for xx in ax0..ax1 {
-                            if xx < 0 || xx >= layer.w as i64 { continue; }
-                            let i = ((yy * layer.w as i64 + xx) * 4 + 3) as usize;
-                            layer.data[i] = 0;
-                        }
-                    }
-                }
-                x0 += wpx + space_w;
-            }
         }
 
         apply_effects(&mut layer, item, size_px);
@@ -378,15 +356,29 @@ fn apply_effects(layer: &mut Layer, item: &TextItem, size_px: f32) {
     let fill = layer.data.clone();
     let mut composed = vec![0u8; w * h * 4];
 
-    // Glow (bottom-most)
+    // Dual-layer glow (bottom-most): wide ambient glow + tight intense core
     if item.glow > 0.5 {
-        let mut g_alpha = alpha.clone();
-        gaussian_blur_u8(&mut g_alpha, layer.w, layer.h, (item.glow * 1.6).round().max(3.0) as usize, item.glow * 0.55, 1);
         let gc = hex_to_rgb(&item.glow_color);
+        // 1. Wide soft ambient glow
+        let mut g_wide = alpha.clone();
+        let wide_r = (item.glow * 1.8).round().max(4.0) as usize;
+        let wide_sig = item.glow * 0.75;
+        gaussian_blur_u8(&mut g_wide, layer.w, layer.h, wide_r, wide_sig, 1);
         for i in 0..w * h {
-            let a = g_alpha[i];
+            let a = g_wide[i];
             if a == 0 { continue; }
-            let src_a = (a as f32 / 255.0 * 0.9).min(1.0);
+            let src_a = (a as f32 / 255.0 * 0.45).min(1.0);
+            blend_under(&mut composed, i * 4, gc, (src_a * 255.0) as u8);
+        }
+        // 2. Tight intense core glow
+        let mut g_tight = alpha.clone();
+        let tight_r = (item.glow * 0.7).round().max(2.0) as usize;
+        let tight_sig = item.glow * 0.28;
+        gaussian_blur_u8(&mut g_tight, layer.w, layer.h, tight_r, tight_sig, 1);
+        for i in 0..w * h {
+            let a = g_tight[i];
+            if a == 0 { continue; }
+            let src_a = (a as f32 / 255.0 * 0.85).min(1.0);
             blend_under(&mut composed, i * 4, gc, (src_a * 255.0) as u8);
         }
     }

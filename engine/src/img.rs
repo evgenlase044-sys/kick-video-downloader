@@ -241,7 +241,8 @@ impl Frame {
     }
 
     /// Alpha-blend a layer scaled by `scale` around pivot (cx, cy) in frame coords,
-    /// plus integer offset (dx, dy). Used for pop-in/impact animations.
+    /// plus integer offset (dx, dy). Uses bounding-box clipping and bilinear filtering
+    /// for smooth subpixel scaling without jagged nearest-neighbor artifacts.
     pub fn blend_layer_scaled(&mut self, layer: &Layer, scale: f32, cx: f32, cy: f32, dx: i64, dy: i64) {
         if (scale - 1.0).abs() < 0.002 {
             let shifted = Layer {
@@ -254,24 +255,81 @@ impl Frame {
             self.blend_layer(&shifted);
             return;
         }
-        let inv = 1.0 / scale.max(0.001);
-        let lw = layer.w as i64;
-        let lh = layer.h as i64;
-        for fy in 0..self.h as i64 {
+        if scale <= 0.001 || layer.w == 0 || layer.h == 0 {
+            return;
+        }
+        let inv = 1.0 / scale;
+        let lw = layer.w as f32;
+        let lh = layer.h as f32;
+
+        let l_min_x = layer.x_off as f32 + dx as f32;
+        let l_max_x = l_min_x + lw;
+        let l_min_y = layer.y_off as f32 + dy as f32;
+        let l_max_y = l_min_y + lh;
+
+        let dst_min_x = (((l_min_x - cx) * scale + cx).floor() as i64).clamp(0, self.w as i64 - 1);
+        let dst_max_x = (((l_max_x - cx) * scale + cx).ceil() as i64).clamp(0, self.w as i64 - 1);
+        let dst_min_y = (((l_min_y - cy) * scale + cy).floor() as i64).clamp(0, self.h as i64 - 1);
+        let dst_max_y = (((l_max_y - cy) * scale + cy).ceil() as i64).clamp(0, self.h as i64 - 1);
+
+        let l_stride = layer.w as usize;
+        let d_stride = self.w as usize;
+
+        for fy in dst_min_y..=dst_max_y {
             let fyd = fy as f32 + 0.5;
-            for fx in 0..self.w as i64 {
-                // frame point relative to pivot → layer coords (inverse scale)
-                let lx = ((fx as f32 + 0.5 - cx) * inv + cx - layer.x_off as f32 - dx as f32).floor() as i64;
-                let ly = ((fyd - cy) * inv + cy - layer.y_off as f32 - dy as f32).floor() as i64;
-                if lx < 0 || ly < 0 || lx >= lw || ly >= lh { continue; }
-                let li = ((ly * lw + lx) * 4) as usize;
-                let a = layer.data[li + 3] as f32 / 255.0;
-                if a <= 0.0 { continue; }
-                let fi = ((fy * self.w as i64 + fx) * 3) as usize;
+            let src_y = (fyd - cy) * inv + cy - l_min_y - 0.5;
+            if src_y < -0.5 || src_y >= lh - 0.5 {
+                continue;
+            }
+            let y0 = src_y.floor() as i64;
+            let y1 = y0 + 1;
+            let fy_frac = src_y - y0 as f32;
+            let cy0 = y0.clamp(0, layer.h as i64 - 1) as usize;
+            let cy1 = y1.clamp(0, layer.h as i64 - 1) as usize;
+
+            for fx in dst_min_x..=dst_max_x {
+                let fxd = fx as f32 + 0.5;
+                let src_x = (fxd - cx) * inv + cx - l_min_x - 0.5;
+                if src_x < -0.5 || src_x >= lw - 0.5 {
+                    continue;
+                }
+                let x0 = src_x.floor() as i64;
+                let x1 = x0 + 1;
+                let fx_frac = src_x - x0 as f32;
+                let cx0 = x0.clamp(0, layer.w as i64 - 1) as usize;
+                let cx1 = x1.clamp(0, layer.w as i64 - 1) as usize;
+
+                let idx00 = (cy0 * l_stride + cx0) * 4;
+                let idx10 = (cy0 * l_stride + cx1) * 4;
+                let idx01 = (cy1 * l_stride + cx0) * 4;
+                let idx11 = (cy1 * l_stride + cx1) * 4;
+
+                let a00 = layer.data[idx00 + 3] as f32;
+                let a10 = layer.data[idx10 + 3] as f32;
+                let a01 = layer.data[idx01 + 3] as f32;
+                let a11 = layer.data[idx11 + 3] as f32;
+
+                let w00 = (1.0 - fx_frac) * (1.0 - fy_frac);
+                let w10 = fx_frac * (1.0 - fy_frac);
+                let w01 = (1.0 - fx_frac) * fy_frac;
+                let w11 = fx_frac * fy_frac;
+
+                let a = (a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11) / 255.0;
+                if a <= 0.002 {
+                    continue;
+                }
+
+                let fi = (fy as usize * d_stride + fx as usize) * 3;
+                let inv_a = 1.0 - a;
+
                 for k in 0..3 {
-                    let dst = self.data[fi + k] as f32;
-                    let src = layer.data[li + k] as f32;
-                    self.data[fi + k] = (src * a + dst * (1.0 - a)).round() as u8;
+                    let c00 = layer.data[idx00 + k] as f32;
+                    let c10 = layer.data[idx10 + k] as f32;
+                    let c01 = layer.data[idx01 + k] as f32;
+                    let c11 = layer.data[idx11 + k] as f32;
+                    let src_col = c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11;
+                    let dst_col = self.data[fi + k] as f32;
+                    self.data[fi + k] = (src_col * a + dst_col * inv_a).round().clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -359,34 +417,43 @@ pub fn gaussian_blur_u8(data: &mut [u8], w: u32, h: u32, radius: usize, sigma: f
     });
 }
 
-/// Max-filter (dilation) over an alpha channel stored in an RGBA layer (stride 4, ch 3).
+/// Euclidean circular dilation over alpha channel stored in an RGBA layer (stride 4, ch 3).
+/// Eliminates square box corners and gives smooth, rounded strokes.
 pub fn dilate_alpha(layer: &Layer, radius: usize) -> Vec<u8> {
     let wu = layer.w as usize;
     let hu = layer.h as usize;
-    let mut tmp = vec![0u8; wu * hu];
-    let alpha: Vec<u8> = (0..wu * hu).map(|i| layer.data[i * 4 + 3]).collect();
-    // horizontal max
-    for y in 0..hu {
-        for x in 0..wu {
-            let mut m = 0u8;
-            for dx in -(radius as i64)..=(radius as i64) {
-                let sx = (x as i64 + dx).clamp(0, wu as i64 - 1) as usize;
-                m = m.max(alpha[y * wu + sx]);
-            }
-            tmp[y * wu + x] = m;
-        }
-    }
-    // vertical max
     let mut out = vec![0u8; wu * hu];
-    for y in 0..hu {
-        for x in 0..wu {
-            let mut m = 0u8;
-            for dy in -(radius as i64)..=(radius as i64) {
-                let sy = (y as i64 + dy).clamp(0, hu as i64 - 1) as usize;
-                m = m.max(tmp[sy * wu + x]);
+    if radius == 0 || wu == 0 || hu == 0 {
+        return (0..wu * hu).map(|i| layer.data[i * 4 + 3]).collect();
+    }
+    let alpha: Vec<u8> = (0..wu * hu).map(|i| layer.data[i * 4 + 3]).collect();
+    let r = radius as i64;
+    let r2 = r * r;
+
+    // Precompute circle offsets (dx, dy)
+    let mut offsets = Vec::new();
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx * dx + dy * dy <= r2 {
+                offsets.push((dx, dy));
             }
-            out[y * wu + x] = m;
         }
     }
+
+    out.par_chunks_exact_mut(wu).enumerate().for_each(|(y, row)| {
+        for x in 0..wu {
+            let mut m = 0u8;
+            for &(dx, dy) in &offsets {
+                let sy = (y as i64 + dy).clamp(0, hu as i64 - 1) as usize;
+                let sx = (x as i64 + dx).clamp(0, wu as i64 - 1) as usize;
+                let val = alpha[sy * wu + sx];
+                if val > m {
+                    m = val;
+                    if m == 255 { break; }
+                }
+            }
+            row[x] = m;
+        }
+    });
     out
 }
