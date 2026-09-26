@@ -1763,6 +1763,23 @@
         }
         return out;
     }
+    const __proxyCache = new Map();
+    function __proxyUrlCached(filename) {
+        if (!__proxyCache.has(filename)) {
+            __proxyCache.set(filename, null);   // null = pending
+            fetch("/api/proxy", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ filename: filename })
+            }).then(r => r.json()).then(d => {
+                if (d && d.proxy) {
+                    __proxyCache.set(filename, "/api/media/stream?file=.proxies/" + d.proxy);
+                }
+            }).catch(() => {});
+        }
+        return __proxyCache.get(filename);       // may be null on first call (P0 meanwhile)
+    }
+
     // ── §16 P0: canvas monitor — ONE canvas over the monitor, ONE hidden
     // <video> per unique file, master-clock sync, canvas text (no CSS anims),
     // WebGL2 grade with the own 65^3 LUT. Active for the 9:16 Shorts view. ──
@@ -1840,7 +1857,16 @@
                 }
                 return out;
             },
-            now() { return state.currentTime; }
+            now() { return state.currentTime; },
+            // §16 P1: WebCodecs exact frames with per-asset worker + proxy scrub
+            decoderFor(clip) {
+                if (!window.CoreWebCodecs || !window.CoreWebCodecs.supported()) return null;
+                const media = clip.media || {};
+                if (!media.filename) return null;
+                const proxyUrl = __proxyUrlCached(media.filename);
+                return window.CoreWebCodecs.decoderFor(media.filename, media.stream_url,
+                    proxyUrl, state.previewFps || 60);
+            }
         };
         const mon = new window.CoreCanvasMonitor(canvas, hooks);
         window.__canvasMonitor = mon;

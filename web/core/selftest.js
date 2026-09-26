@@ -13,6 +13,11 @@ const TM = require("./timeMap.js");
 const GEO = require("./geometry.js");
 const LUT = require("./lut3d.js");
 const TXT = require("./text/canvasText.js");
+const DEMUX = require("./mp4/demux.js");
+const FI = require("./mp4/frameIndex.js");
+const RingCache = require("./mp4/ringCache.js");
+const CMP = require("./composition.js");
+const COMP = require("./render/composer.js");
 
 let failures = 0, current = "";
 function check(cond, label, extra) {
@@ -118,6 +123,124 @@ const stored = [lut.data[(((gx * lut.N) + gx) * lut.N + gx) * 3],
                 lut.data[(((gx * lut.N) + gx) * lut.N + gx) * 3 + 1],
                 lut.data[(((gx * lut.N) + gx) * lut.N + gx) * 3 + 2]];
 check(Math.abs(g[0] - stored[0]) < 1e-6, "node sampling == stored value");
+
+// ── P1: demux + frame index (§16 P1) ───────────────────────────────────
+section("P1 demux + frame index (§16)");
+const fs2 = require("fs");
+const path2 = require("path");
+const testMp4 = path2.join(__dirname, "..", "..", "scratch", "_demux_test.mp4");
+if (fs2.existsSync(testMp4)) {
+    const track = DEMUX.parseVideoTrack(fs2.readFileSync(testMp4));
+    check(track.codec.startsWith("avc1."), "codec string from avcC", track.codec);
+    check(track.description && track.description.length > 8, "avcC description extracted");
+    check(track.sampleCount === 60 && Math.abs(track.duration - 2.0) < 0.01,
+          "sample table complete", track.sampleCount + " samples, " + track.duration.toFixed(2) + "s");
+    const idx = FI.build(track);
+    // §16 P1 frame selection: floor(src·fps + 1e-6)
+    check(FI.frameAt(0.0, 30) === 0 && FI.frameAt(0.0333, 30) === 0 && FI.frameAt(0.034, 30) === 1,
+          "frameAt = floor(src*fps + 1e-6)");
+    check(FI.frameAt(1.999, 30) === 59, "frameAt at the end");
+    const plan = FI.decodePlan(idx, 17);
+    check(plan && plan.startSample <= plan.targetSample, "decode plan: sync <= target",
+          JSON.stringify(plan));
+    // B-frames: display order differs from decode order
+    let swapped = false;
+    for (let i = 0; i < idx.order.length; i++) if (idx.order[i] !== i) { swapped = true; break; }
+    check(swapped, "B-frame display order handled");
+    // pts non-decreasing in display order
+    let mono = true;
+    for (let i = 1; i < idx.order.length; i++) {
+        if (idx.ptsSec[idx.order[i]] < idx.ptsSec[idx.order[i - 1]] - 1e-6) { mono = false; break; }
+    }
+    check(mono, "display pts monotonic");
+} else {
+    console.log("  SKIP  " + testMp4 + " not generated");
+}
+
+// ── P1: ring cache ≤12 with close() accounting ─────────────────────────
+section("P1 ring cache (§16)");
+{
+    let closed = [];
+    const rc = new RingCache(12, f => closed.push(f));
+    for (let i = 0; i < 20; i++) rc.put(i, { n: i });
+    check(rc.size === 12, "capacity respected", rc.size);
+    check(closed.length === 8, "evicted frames closed (no leaks)", closed.length);
+    check(closed.every((f, i) => f.n === i), "LRU eviction order");
+    rc.put(5, { n: 5 });
+    check(rc.get(5).n === 5, "LRU get refreshes");
+    rc.clear();
+    check(rc.closed === 21, "clear closes everything (incl. re-insert eviction)", rc.closed);
+}
+
+// ── шаг 1: composition mapTime / evalAnim (§8) ─────────────────────────
+section("шаг 1 mapTime + evalAnim (§8)");
+{
+    const layer = { time: { in: 3, srcIn: 2512.3 } };
+    const mt = CMP.mapTime(layer, 5);
+    check(Math.abs(mt.local - 2) < 1e-9 && Math.abs(mt.src - 2514.3) < 1e-9, "mapTime linear");
+    const ramp = { time: { in: 0, srcIn: 0, speed: { k: [[0, 1], [1, 0.5], [2, 2]] } } };
+    const m1 = CMP.mapTime(ramp, 1);
+    check(Math.abs(m1.src - 0.75) < 1e-6, "speed ramp integral 0..1s = 0.75", m1.src.toFixed(4));
+    const m2 = CMP.mapTime(ramp, 2);
+    check(Math.abs(m2.src - 2.0) < 1e-6, "speed ramp integral 0..2s = 2.0", m2.src.toFixed(4));
+    check(CMP.evalAnim(0.5, 0) === 0.5, "static value");
+    const kf = { k: [[0, 0], [1, 100, "linear"], [2, 100]] };
+    check(Math.abs(CMP.evalAnim(kf, 0.5) - 50) < 1e-9, "linear keyframes");
+    const hold = { k: [[0, 7, "hold"], [1, 9]] };
+    check(CMP.evalAnim(hold, 0.5) === 7 && CMP.evalAnim(hold, 1.5) === 9, "hold then jump");
+    const snap = { k: [[0, 0, "snap"], [1, 10]] };
+    check(CMP.evalAnim(snap, 0.5) > 9, "snap ease fast-out", CMP.evalAnim(snap, 0.5).toFixed(2));
+    const bez = { k: [[0, 0], [1, 1, ["bezier", 0.33, 0, 0.67, 1]]] };
+    check(Math.abs(CMP.evalAnim(bez, 0.5) - 0.5) < 0.05, "ease bezier symmetric", CMP.evalAnim(bez, 0.5).toFixed(3));
+    const spr = { spring: { O: 0.18, Ts: 0.3 }, from: 0, to: 1, at: 0 };
+    let peak = 0;
+    for (let i = 0; i <= 3000; i++) peak = Math.max(peak, CMP.evalAnim(spr, i / 10000));
+    check(Math.abs((peak - 1) * 100 - 18) <= 2, "spring evalAnim overshoot 18%±2", ((peak - 1) * 100).toFixed(1) + "%");
+    check(CMP.evalAnim(spr, -0.1) === 0, "spring holds `from` before `at`");
+    const keys = [{ t: 0, x: 0.5, y: 0.5, w: 0.1, h: 0.1 }, { t: 1, x: 0.52, y: 0.5, w: 0.1, h: 0.1 }];
+    const fc = CMP.followCam(keys, { deadZone: 0.04, maxSpeed: 0.6, Ts: 0.35, sampleFps: 60 });
+    const c0 = fc(0.5);
+    check(Math.abs(c0.x - 0.5) < 0.005, "follow-cam dead zone keeps crop still", c0.x.toFixed(4));
+    const far = CMP.followCam([{ t: 0, x: 0.5, y: 0.5 }, { t: 1, x: 0.9, y: 0.5 }],
+                              { deadZone: 0.01, maxSpeed: 0.6, Ts: 0.35, sampleFps: 60 })(1.0);
+    check(far.x > 0.75 && far.x < 0.9, "follow-cam follows within max speed", far.x.toFixed(3));
+}
+
+// ── шаг 1: composer draw list + scale parity SSIM (§7.4) ───────────────
+section("шаг 1 composer + scale parity (§7.4)");
+{
+    const comp = {
+        version: 3, canvas: { w: 1080, h: 1920, fps: 60, bg: "#000" }, duration: 2,
+        assets: { src: { path: "x.mp4", w: 1280, h: 720, fps: 60 } },
+        layers: [
+            { id: "bg", type: "video", asset: "src", z: 0,
+              time: { in: 0, out: 2, srcIn: 10 },
+              crop: { space: "source", x: 0.05, y: 0.1, w: 0.9, h: 0.8 },
+              effects: [{ type: "grade", preset: "viral_punch" }] },
+            { id: "cam", type: "video", asset: "src", z: 1,
+              time: { in: 0, out: 2, srcIn: 10 },
+              crop: { space: "source", x: 0.6, y: 0.05, w: 0.35, h: 0.35 },
+              pip: { x: 0.688, y: 0.018, w: 0.30 } },
+            { id: "fx1", type: "fx", kind: "flash", in: 0.4, out: 0.58, color: "white", peak: 0.85 }
+        ]
+    };
+    const frame = COMP.renderFrame(comp, 30, { scale: 1 });
+    check(frame.w === 1080 && frame.h === 1920 && frame.t === 0.5, "renderFrame frame -> t = f/fps");
+    check(frame.ops.filter(o => o.op === "video").length === 2, "two video layers in draw list");
+    check(frame.grade.on === true, "grade flag from effects");
+    check(frame.ops.every(o => o.op !== "video" || (o.sn && o.dn)), "normalized sn/dn rects on video ops");
+    check(Math.abs(COMP.flashEnvelope(0) - 0) < 1e-9 && Math.abs(COMP.flashEnvelope(0.12) - 1) < 1e-9,
+          "flash envelope: attack to peak at 12%");
+    check(Math.abs(COMP.flashEnvelope(0.5) - Math.exp(-0.38 * 4.2)) < 1e-9, "flash envelope: exp decay");
+    // §7.4 scale parity: SSIM >= 0.99 on 50 points, grain off
+    const lut = LUT.parseCube(fs2.readFileSync(path2.join(__dirname, "..", "..", "tv_grade.cube"), "utf8"));
+    const opts = { lut: lut, sourcePixel: (a, su, sv, st) =>
+        [0.5 + 0.5 * Math.sin(su * 6.28 + st), 0.5 + 0.5 * Math.cos(sv * 6.28), 0.5] };
+    const ssim = COMP.scaleParity(comp, 30, opts, 50, 0.4);
+    check(ssim >= 0.99, "scale parity SSIM >= 0.99 on 50 points (scale 1 vs 0.4)", ssim.toFixed(5));
+    const ssim2 = COMP.scaleParity(comp, 90, opts, 50, 0.25);
+    check(ssim2 >= 0.99, "scale parity SSIM >= 0.99 at another frame/scale", ssim2.toFixed(5));
+}
 
 console.log("\n" + (failures ? "SELFTEST FAILED: " + failures : "ALL CORE SELFTESTS PASSED"));
 process.exit(failures ? 1 : 0);

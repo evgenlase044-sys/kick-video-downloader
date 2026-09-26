@@ -530,6 +530,57 @@ def test_p0():
     return ok
 
 
+# ─────────────────────────────────────── §7.4 P1 + step 1 (composition) ──
+def test_p1():
+    section("§7.4  P1 + шаг 1 — WebCodecs worker, composition, renderFrame parity")
+    ok = True
+    # 1) generate a real B-frame MP4 for the demuxer tests, then run selftest
+    demux_test = os.path.join(BASE, "scratch", "_demux_test.mp4")
+    os.makedirs(os.path.dirname(demux_test), exist_ok=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=2",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+                    "-g", "10", "-bf", "2", "-pix_fmt", "yuv420p", demux_test],
+                   check=True, timeout=120)
+    r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
+                       capture_output=True, text=True, timeout=120, cwd=BASE)
+    ok &= check(r.returncode == 0, "web/core selftest (incl. P1 demux/ring/mapTime/composer SSIM)",
+                (r.stdout[-500:] + r.stderr[-200:]) if r.returncode else "")
+    for marker in ("P1 demux + frame index", "P1 ring cache", "composer + scale parity"):
+        ok &= check(marker in r.stdout, "selftest section present: " + marker)
+    ok &= check("SSIM >= 0.99" in r.stdout and "FAIL" not in r.stdout,
+                "scale parity SSIM >= 0.99 gates green")
+
+    # 2) modules load and degrade honestly outside the browser
+    r2 = subprocess.run(["node", "-e",
+                         "const W = require('./web/core/webcodecs.js');"
+                         "console.log(JSON.stringify({supported: W.supported()}));"],
+                        capture_output=True, text=True, timeout=30, cwd=BASE)
+    ok &= check(r2.returncode == 0 and json.loads(r2.stdout.strip())["supported"] is False,
+                "webcodecs facade loads in Node, supported()=false (P0 fallback)")
+
+    # 3) static wiring
+    ed = read(os.path.join(BASE, "web", "editor.js"))
+    mon = read(os.path.join(BASE, "web", "core", "canvasMonitor.js"))
+    html = read(os.path.join(BASE, "web", "index.html"))
+    worker = read(os.path.join(BASE, "web", "core", "mp4", "decoderWorker.js"))
+    demux = read(os.path.join(BASE, "web", "core", "mp4", "demux.js"))
+    ok &= check("decoderFor" in ed and "__proxyUrlCached" in ed,
+                "editor provides decoder hook + proxy cache (§16 P1)")
+    ok &= check("_takeExactFrame" in mon and "floor" in read(os.path.join(BASE, "web", "core", "mp4", "frameIndex.js")),
+                "monitor uses exact frames; frame pick floor(src*fps+1e-6)")
+    ok &= check("core/webcodecs.js" in html, "webcodecs facade loaded in index.html")
+    ok &= check("RING_CAP = 12" in worker and "SCRUB_LIMIT_SEC = 1.5" in worker,
+                "worker: ring cache <=12, scrub limit 1.5s -> proxy")
+    ok &= check("close()" in worker and "clone()" in worker,
+                "worker closes cached originals, ships clones to main")
+    ok &= check("avcC" in demux and "ctts" in demux and "stss" in demux,
+                "own BMFF demuxer: avcC description, ctts (B-frames), stss (sync)")
+    ok &= check("optimizeForLatency" in worker and "decodeQueueSize" in worker,
+                "VideoDecoder configured, decodeQueueSize <= 4")
+    return ok
+
+
 class _MockGroq(BaseHTTPRequestHandler):
 
     behavior = {"fail_429": 0, "requests": []}
@@ -669,6 +720,7 @@ def main():
     ok &= test_tracker()
     ok &= test_groq_mock()
     ok &= test_p0()
+    ok &= test_p1()
     dt = time.time() - t0
     print(f"\n{'=' * 64}")
     if FAILURES:

@@ -29,6 +29,8 @@
         this.lut = null;
         this._seekPending = new Set();
         this._stylesLoaded = false;
+        this._exact = null;            // {name, t, frame|video} decoded frame (§16 P1)
+        this._exactPending = false;
         this._initGl();
         this._loadStyles();
     }
@@ -149,6 +151,50 @@
         return TM.stepFrames(t, s.fps || 60, n);
     };
 
+    CanvasMonitor.prototype._decoderFor = function (clip) {
+        if (!this.hooks.decoderFor) return null;
+        try { return this.hooks.decoderFor(clip); } catch (e) { return null; }
+    };
+
+    /**
+     * §16 P1: exact decoded frame for the paused preview. Returns
+     * {frame|video} matching (clip, t) or null — in which case the P0 pool
+     * frame is drawn and an async request is (debounce-)issued; when it
+     * lands, renderAt runs again with the exact frame. Every failure mode
+     * simply keeps the P0 path alive.
+     */
+    CanvasMonitor.prototype._takeExactFrame = function (clip, t, s) {
+        const ex = this._exact;
+        const halfFrame = 0.5 / (s.fps || 60);
+        if (ex && ex.name === clip.media.filename && Math.abs(ex.t - t) < halfFrame) {
+            this._exact = null;
+            return ex;
+        }
+        if (ex && ex.frame) { try { ex.frame.close(); } catch (e) {} this._exact = null; }
+        if (!s.playing && !this._exactPending) {
+            const dec = this._decoderFor(clip);
+            if (dec) {
+                this._exactPending = true;
+                const self = this;
+                const tReq = t;
+                const name = clip.media.filename;
+                dec.requestFrame(tReq).then(function (res) {
+                    self._exactPending = false;
+                    if (res.ok) {
+                        self._exact = { name: name, t: tReq, frame: res.frame };
+                        self.renderAt(self.hooks.now ? self.hooks.now() : tReq);
+                    } else if (res.proxy && res.video) {
+                        // scrub jump > 1.5s: the proxy 960x540 GOP-10 frame shows now
+                        self._exact = { name: name, t: tReq, video: res.video };
+                        self.renderAt(self.hooks.now ? self.hooks.now() : tReq);
+                    }
+                    // res.ok === false -> silent P0 fallback
+                });
+            }
+        }
+        return null;
+    };
+
     // ── render ───────────────────────────────────────────────────────────
     CanvasMonitor.prototype.renderAt = function (t) {
         const s = this.hooks.settings();
@@ -177,17 +223,26 @@
         w.save();
         w.translate(shake.dx, shake.dy);
 
-        // base layer: split / fullscreen / talking head — same math as export
-        const v = this.getVideo(base);
-        const srcW = v.videoWidth || 1280, srcH = v.videoHeight || 720;
+        // base layer: split / fullscreen / talking head — same math as export.
+        // §16 P1: when paused, prefer the EXACT WebCodecs-decoded frame
+        // (floor(src*fps+1e-6)); the P0 <video> pool is the fallback.
+        let v = this.getVideo(base);
+        let srcW = v.videoWidth || 1280, srcH = v.videoHeight || 720;
         this._syncTime(v, base, t, s);
+        const exact = this._takeExactFrame(base, t, s);
+        if (exact) {
+            v = exact.frame || exact.video;
+            srcW = exact.frame ? exact.frame.displayWidth : (exact.video.videoWidth || srcW);
+            srcH = exact.frame ? exact.frame.displayHeight : (exact.video.videoHeight || srcH);
+        }
         const ops = GEO.composeDrawOps({
             format: s.format, srcW: srcW, srcH: srcH, outW: outW, outH: outH,
             cropBox: s.cropBox, bgBox: s.bgBox, topRatio: s.topRatio,
             sourceId: base.media.filename
         });
         for (const op of ops) {
-            if (v.readyState >= 2) {
+            const ready = exact ? (exact.frame || exact.video.readyState >= 2) : v.readyState >= 2;
+            if (ready) {
                 w.drawImage(v, op.sx, op.sy, op.sw, op.sh, op.dx, op.dy, op.dw, op.dh);
             }
         }
