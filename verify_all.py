@@ -581,6 +581,93 @@ def test_p1():
     return ok
 
 
+# ──────────────────────────────── §17.2 WS render e2e + §7.5 static gates ──
+def test_ws_render():
+    section("§17.2  WS render e2e + шаг 2 static gates")
+    ok = True
+    import numpy as np
+    import server
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    # 1) golden-numeric gates for the render-effect math (§7.5)
+    r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
+                       capture_output=True, text=True, timeout=120, cwd=BASE)
+    ok &= check(r.returncode == 0, "selftest incl. шаг 2 golden (SDF/Kawase/zoom/shake/YUV)",
+                (r.stdout[-400:] + r.stderr[-200:]) if r.returncode else "")
+    ok &= check("шаг 2 golden" in r.stdout, "golden section present")
+    for gate in ("glow alpha is ZERO when word opacity is 0",
+                 "jump-flood distance golden", "Kawase energy preserved",
+                 "shake constant overscan 1+2*amp/W (N11)"):
+        ok &= check(gate in r.stdout, "golden gate: " + gate)
+
+    # 2) §17.2 WS e2e: stream 10 synthetic yuv420p frames through /ws/render
+    with client.websocket_connect("/ws/render/verify_test") as ws:
+        W, H, FPS, N = 64, 64, 30, 10
+        ws.send_json({"w": W, "h": H, "fps": FPS, "frames": N,
+                      "audio_wav": "", "out": "_ws_render_verify.mp4"})
+        # BT.709 limited pack of a moving gradient
+        xx, yy = np.meshgrid(np.arange(W) / W, np.arange(H) / H)
+        # stream ALL frames first (the server acks every 4th + the last one),
+        # then drain messages until done — no per-frame receive deadlock
+        acked = 0
+        done = None
+        for f in range(N):
+            r_ = np.clip(xx + 0.1 * f / N, 0, 1)
+            g_ = np.clip(yy, 0, 1)
+            b_ = np.clip(1 - xx, 0, 1)
+            Y = 16 + 219 * (0.2126 * r_ + 0.7152 * g_ + 0.0722 * b_)
+            Cb = 128 + 224 * (b_ - Y / 255.0) / 1.8556
+            Cr = 128 + 224 * (r_ - Y / 255.0) / 1.5748
+            yP = np.clip(np.round(Y), 16, 235).astype(np.uint8)
+            uP = np.clip(np.round(Cb[::2, ::2]), 16, 240).astype(np.uint8)
+            vP = np.clip(np.round(Cr[::2, ::2]), 16, 240).astype(np.uint8)
+            frame = np.concatenate([yP.flatten(), uP.flatten(), vP.flatten()]).tobytes()
+            ws.send_bytes(frame)
+        while done is None:
+            msg = ws.receive_json()
+            if "ack" in msg:
+                acked = msg["ack"]
+            elif "error" in msg:
+                ok &= check(False, "WS render error", msg["error"])
+                break
+            elif "done" in msg:
+                done = msg
+        ok &= check(acked == N, "all frames acked (credit flow every 4)", str(acked))
+        ok &= check(done is not None and done.get("done") is True, "ffmpeg finished OK",
+                    json.dumps(done)[:200] if done else "no done message")
+
+    out = os.path.join(server.EXPORTED_PACKS_DIR, "_ws_render_verify.mp4")
+    if os.path.exists(out):
+        pr = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-show_entries",
+                             "stream=codec_name,width,height,nb_read_frames,color_space,color_range:format=duration",
+                             "-of", "json", out], capture_output=True, text=True)
+        info = json.loads(pr.stdout)
+        st = info["streams"][0]
+        ok &= check(st["codec_name"] == "h264" and st["width"] == W and st["height"] == H,
+                    "WS output decodes as h264 at the right size", json.dumps(st)[:120])
+        ok &= check(int(st.get("nb_read_frames", 0)) == N, "frame count exact", st.get("nb_read_frames"))
+        ok &= check(st.get("color_space") == "bt709" and st.get("color_range") == "tv",
+                    "WS output tagged BT.709 tv", json.dumps({k: st.get(k) for k in ("color_space", "color_range")}))
+        try:
+            os.remove(out)
+        except Exception:
+            pass
+    else:
+        ok &= check(False, "WS output file exists")
+
+    # 3) static gates: exporter + effects wired
+    html = read(os.path.join(BASE, "web", "index.html"))
+    ok &= check("core/render/exporter.js" in html and "core/render/effects.js" in html
+                and "core/render/yuv.js" in html, "render modules loaded in index.html")
+    exp = read(os.path.join(BASE, "web", "core", "render", "exporter.js"))
+    ok &= check("packYuv420" in exp and "ws/render/" in exp and "unacked < 8" in exp,
+                "exporter: draw-list -> YUV -> WS with <=8 unacked credits (§17.2)")
+    ok &= check("golden.json" in read(os.path.join(BASE, "web", "core", "selftest.js")),
+                "golden snapshot drives §7.5 effect gates")
+    return ok
+
+
 class _MockGroq(BaseHTTPRequestHandler):
 
     behavior = {"fail_429": 0, "requests": []}
@@ -721,6 +808,7 @@ def main():
     ok &= test_groq_mock()
     ok &= test_p0()
     ok &= test_p1()
+    ok &= test_ws_render()
     dt = time.time() - t0
     print(f"\n{'=' * 64}")
     if FAILURES:

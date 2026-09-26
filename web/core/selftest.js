@@ -242,5 +242,81 @@ section("шаг 1 composer + scale parity (§7.4)");
     check(ssim2 >= 0.99, "scale parity SSIM >= 0.99 at another frame/scale", ssim2.toFixed(5));
 }
 
+// ── шаг 2: golden-кадры эффектов §7.5 (детерминированная математика) ────
+section("шаг 2 golden: SDF/Kawase/motion blur/эффекты §15 (§7.5)");
+{
+    const GOLD = require("./render/golden.json");
+    const E = require("./render/effects.js");
+    const YUV = require("./render/yuv.js");
+    // §12.8 noise golden
+    check(E.pcg(1) === GOLD.pcg["1"] && E.pcg(42) === GOLD.pcg["42"] &&
+          E.pcg(0xdeadbeef) === GOLD.pcg["3735928559"], "pcg hash golden");
+    check(Math.abs(E.noise1(7, 0.5) - GOLD.noise1["7_0.5"]) < 1e-6 &&
+          Math.abs(E.noise1(7, 3.5) - GOLD.noise1["7_3.5"]) < 1e-6, "value noise golden");
+    // JFA golden: 8x8, pixel at (3,4)
+    const Wj = 8, Hj = 8, mj = new Uint8Array(Wj * Hj);
+    mj[4 * Wj + 3] = 255;
+    const dj = E.jumpFlood(mj, Wj, Hj);
+    check(dj[4 * Wj + 3] === GOLD.jfa_8x8.center &&
+          Math.abs(dj[4 * Wj + 0] - GOLD.jfa_8x8.left3) < 1e-6 &&
+          Math.abs(dj[7 * Wj + 7] - GOLD.jfa_8x8.diag) < 1e-6, "jump-flood distance golden");
+    check(E.strokeAlpha(0, 1) === GOLD.stroke_r1.d0 &&
+          Math.abs(E.strokeAlpha(1, 1) - GOLD.stroke_r1.d1) < 1e-9 &&
+          E.strokeAlpha(2, 1) === GOLD.stroke_r1.d2, "SDF stroke smoothstep golden");
+    // Kawase: energy conservation + spread
+    const Wk = 32, Hk = 32, src = new Float32Array(Wk * Hk);
+    src[16 * Wk + 16] = 255;
+    const bl = E.kawaseBlur(src, Wk, Hk, 2);
+    let sum = 0, maxv = 0;
+    for (const v of bl) { sum += v; maxv = Math.max(maxv, v); }
+    check(Math.abs(sum - GOLD.kawase2_impulse_255.energy) < 0.5, "Kawase energy preserved", sum.toFixed(1));
+    check(maxv > 0 && maxv < 255, "Kawase spreads the impulse", maxv.toFixed(2));
+    // glow coupling: no glow without text (§7.2), opacity^1.5
+    check(E.glowAlpha(0, 0.5) === GOLD.glowAlpha.o0, "glow alpha is ZERO when word opacity is 0");
+    check(Math.abs(E.glowAlpha(0.5, 0.5) - GOLD.glowAlpha["o05_0.5"]) < 1e-4, "glowAlpha = opacity^1.5 * amount");
+    // zoom punch golden
+    const zp = E.zoomPunch(0.1, { A: 0.15, overshoot: 0.12, settleMs: 220 });
+    check(Math.abs(zp.scale - GOLD.zoomPunch.scale_100ms_A015) < 1e-4, "zoom punch scale golden", zp.scale.toFixed(5));
+    let peak = 0;
+    for (let i = 0; i <= 400; i++) peak = Math.max(peak, E.zoomPunch(i / 1000, { A: 0.15, overshoot: 0.12, settleMs: 220 }).scale);
+    check(Math.abs(peak - GOLD.zoomPunch.peakScale_A015_O012) < GOLD.zoomPunch.peakTolerance,
+          "zoom punch peak = 1 + A*(1+overshoot)", peak.toFixed(5));
+    // shake golden + constant overscan (N11)
+    const sh = E.shake(0.2, { amp: 14, freq: 9, tauMs: 120, seed: 7, dur: 0.35, W: 1080 });
+    check(Math.abs(sh.dx - GOLD.shake_seed7.dx_200ms) < 1e-4 &&
+          Math.abs(sh.dy - GOLD.shake_seed7.dy_200ms) < 1e-4 &&
+          Math.abs(sh.rot - GOLD.shake_seed7.rot_200ms) < 1e-4 &&
+          Math.abs(sh.env - GOLD.shake_seed7.env_200ms) < 1e-4, "shake state golden (seed 7 @200ms)");
+    const sh0 = E.shake(2.0, { amp: 14, freq: 9, tauMs: 120, seed: 7, dur: 0.35, W: 1080 });
+    check(sh0.env === 0 && sh0.dx === 0, "shake is zero after its duration (no permanent shake)");
+    check(Math.abs(sh.overscan - GOLD.shake_seed7.overscan_amp14_w1080) < 1e-6,
+          "shake constant overscan 1+2*amp/W (N11)");
+    // §17.2 YUV pack: BT.709 limited, plane sizes, formula fidelity
+    const Yl = YUV.rgb2yuv709(1, 1, 1);
+    check(Math.abs(Yl.Y - 235) < 1e-9 && Math.abs(Yl.Cb - 128) < 1e-9, "BT.709 white = Y235 Cb128");
+    const Yb = YUV.rgb2yuv709(0, 0, 0);
+    check(Math.abs(Yb.Y - 16) < 1e-9 && Math.abs(Yb.Cb - 128) < 1e-9, "BT.709 black = Y16");
+    const wT = 16, hT = 16, rgba = new Uint8Array(wT * hT * 4);
+    let acc = 7;
+    for (let i = 0; i < rgba.length; i += 4) {
+        acc = (acc * 1103515245 + 12345) >>> 0;
+        rgba[i] = acc & 255; rgba[i + 1] = (acc >> 8) & 255; rgba[i + 2] = (acc >> 16) & 255; rgba[i + 3] = 255;
+    }
+    const pl = YUV.packYuv420(rgba, wT, hT);
+    check(pl.y.length === wT * hT && pl.u.length === wT * hT / 4 && pl.v.length === wT * hT / 4,
+          "yuv420 plane sizes");
+    let maxErr = 0;
+    for (let y = 0; y < hT; y++) {
+        for (let x = 0; x < wT; x++) {
+            const i = (y * wT + x) * 4;
+            const c = YUV.rgb2yuv709(rgba[i] / 255, rgba[i + 1] / 255, rgba[i + 2] / 255);
+            maxErr = Math.max(maxErr, Math.abs(pl.y[y * wT + x] - c.Y));
+        }
+    }
+    check(maxErr <= 1.0, "Y plane within 1 LSB of the BT.709 formula", maxErr.toFixed(3));
+    const raw = YUV.interleave(pl);
+    check(raw.length === wT * hT * 3 / 2, "raw frame = w*h*1.5 bytes (WS protocol)");
+}
+
 console.log("\n" + (failures ? "SELFTEST FAILED: " + failures : "ALL CORE SELFTESTS PASSED"));
 process.exit(failures ? 1 : 0);

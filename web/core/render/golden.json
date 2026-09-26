@@ -1,0 +1,44 @@
+{
+  "_comment": "Golden numeric snapshot of web/core/render/effects.js (§7.5). Regenerate: node tools/gen_golden.js — any UNINTENDED change to noise/blur/effect math breaks this file.",
+  "pcg": {
+    "1": 2831084034,
+    "42": 1223963391,
+    "3735928559": 2122688538
+  },
+  "noise1": {
+    "7_0.5": 0.403875,
+    "7_3.5": -0.721479
+  },
+  "jfa_8x8": {
+    "center": 0,
+    "left3": 3.0,
+    "diag": 5.0
+  },
+  "stroke_r1": {
+    "d0": 1.0,
+    "d1": 0.5,
+    "d2": 0.0
+  },
+  "kawase2_impulse_255": {
+    "energy": 255.0,
+    "max": 8.96
+  },
+  "glowAlpha": {
+    "o0": 0.0,
+    "o1_0.5": 0.5,
+    "o05_0.5": 0.1768
+  },
+  "zoomPunch": {
+    "scale_100ms_A015": 1.16484,
+    "peakScale_A015_O012": 1.168,
+    "peakTolerance": 0.002
+  },
+  "shake_seed7": {
+    "dx_200ms": -0.8062,
+    "dy_200ms": -0.53412,
+    "rot_200ms": 0.02736,
+    "env_200ms": 0.1889,
+    "overscan_amp14_w1080": 1.025926,
+    "env_2s": 0.0
+  }
+}

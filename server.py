@@ -9,7 +9,7 @@ import subprocess
 import shutil
 from typing import Dict, Any, Optional, List
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -1745,6 +1745,88 @@ def get_grade_lut():
     if not os.path.exists(lut_path):
         raise HTTPException(status_code=404, detail="LUT не найден")
     return FileResponse(lut_path, media_type="text/plain", filename="tv_grade.cube")
+
+
+# ── §17.2 WebSocket render: Electron draws frames, server pipes rawvideo → x264 ──
+@app.websocket("/ws/render/{job_id}")
+async def ws_render(ws: WebSocket, job_id: str):
+    """
+    PLAN §17.2: the renderer sends a header {w,h,fps,frames,audio_wav,out},
+    then raw yuv420p frames (w*h*1.5 bytes each). Frames stream into
+    ffmpeg rawvideo → libx264 slow CRF16 (+ AAC audio when audio_wav given,
+    two-pass loudnorm already applied by the caller). Every 4 frames an
+    {ack:n} credit comes back; the client keeps ≤ 8 unacked frames.
+    """
+    await ws.accept()
+    hdr = await ws.receive_json()
+    w = int(hdr["w"]); h = int(hdr["h"]); fps = int(hdr["fps"])
+    frames_total = int(hdr["frames"])
+    audio_wav = hdr.get("audio_wav") or ""
+    out = hdr["out"]
+    out_path = os.path.join(EXPORTED_PACKS_DIR, os.path.basename(out))
+    os.makedirs(EXPORTED_PACKS_DIR, exist_ok=True)
+    ffmpeg_cmd = ["ffmpeg", "-y", "-loglevel", "error",
+                  "-f", "rawvideo", "-pix_fmt", "yuv420p",
+                  "-s", f"{w}x{h}", "-r", str(fps), "-i", "pipe:0"]
+    if audio_wav and os.path.exists(audio_wav):
+        ffmpeg_cmd += ["-i", audio_wav, "-map", "0:v", "-map", "1:a",
+                       "-c:a", "aac", "-b:a", "320k", "-ar", "48000"]
+    else:
+        ffmpeg_cmd += ["-an"]
+    ffmpeg_cmd += [
+        "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-tune", "film",
+        "-profile:v", "high", "-level", "4.2",
+        "-x264-params", "aq-mode=3:deblock=-1,-1",
+        "-g", str(fps * 2), "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709", "-color_primaries", "bt709",
+        "-color_trc", "bt709", "-color_range", "tv",
+        "-movflags", "+faststart", "-map_metadata", "-1", out_path,
+    ]
+    # Windows: Proactor loop supports subprocess pipes for asyncio
+    proc = await asyncio.create_subprocess_exec(
+        *ffmpeg_cmd,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE)
+    n = 0
+    rc = -1
+    err_tail = ""
+    try:
+        frame_bytes = w * h * 3 // 2
+        while n < frames_total:
+            data = await ws.receive_bytes()
+            if len(data) != frame_bytes:
+                await ws.send_json({"error": f"frame {n}: got {len(data)} bytes, expected {frame_bytes}"})
+                break
+            proc.stdin.write(data)
+            await proc.stdin.drain()
+            n += 1
+            if n % 4 == 0 or n == frames_total:
+                await ws.send_json({"ack": n})
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try: await ws.send_json({"error": str(e)})
+        except Exception: pass
+    finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        rc = await proc.wait()
+        if proc.stderr:
+            try:
+                err_tail = (await proc.stderr.read())[-400:].decode("utf-8", "replace")
+            except Exception:
+                err_tail = ""
+        done = (rc == 0 and n >= frames_total and os.path.exists(out_path))
+        try:
+            await ws.send_json({"done": done, "frames": n, "returncode": rc,
+                                "file": os.path.basename(out_path) if done else None,
+                                "stderr": err_tail})
+        except Exception:
+            pass
+        await ws.close()
 
 
 # ── Channel presets: manual webcam/content/layout/style per channel (PLAN §9.4) ──
