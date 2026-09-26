@@ -224,6 +224,10 @@ pub struct TextDraw<'a> {
 
 impl<'a> TextDraw<'a> {
     fn font_for<'f>(&'f self, item: &TextItem) -> &'f LoadedFont {
+        let has_cyrillic = item.text.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
+        if has_cyrillic {
+            return &self.store.sans;
+        }
         match item.style.as_str() {
             "italic" | "impact" => &self.store.sans,
             _ => &self.store.marker,
@@ -487,7 +491,7 @@ pub fn draw_nametag(store: &FontStore, tag: &NameTag, t: f64, canvas_w: u32, can
     if tag.arrow {
         let color = hex_to_rgb(&tag.color);
         let size_px = tag.size * (canvas_h as f32 / 1440.0);
-        let ax = (tag.x * canvas_w as f32) as i64 - (tag.text.len() as f32 * size_px * 0.30) as i64;
+        let ax = (tag.x * canvas_w as f32) as i64 - (tag.text.chars().count() as f32 * size_px * 0.30) as i64;
         let ay = (tag.y * canvas_h as f32) as i64 + (size_px * 0.85) as i64 + l.y_off;
         let s = (size_px * 0.36).max(6.0) as i64;
         for row in 0..s {

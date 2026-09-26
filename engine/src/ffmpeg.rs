@@ -18,10 +18,10 @@ impl FrameDecoder {
     /// Frames keep the source aspect (cover-fit is done by the renderer per frame).
     pub fn open(src: &Path, seek_sec: f64, dur_sec: f64, out_w: u32, out_h: u32) -> Result<Self> {
         // Probe native size first so the renderer can do sub-pixel motion sampling at full detail.
-        let (sw, sh) = probe_size(src)?;
+        let (_sw, _sh) = probe_size(src)?;
         // Feed the renderer at (at least) canvas size; upscale small sources, keep large ones native.
-        let scale = format!("scale={out_w}:{out_h}:force_original_aspect_ratio=increase:flags=bicubic");
-        let mut args = vec![
+        let scale = format!("scale={out_w}:{out_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int:in_color_matrix=bt709:in_range=tv:out_range=pc");
+        let args = vec![
             "-v".into(), "error".into(),
             "-ss".into(), format!("{seek_sec:.3}"),
             "-i".into(), src.to_string_lossy().into_owned(),
@@ -32,9 +32,7 @@ impl FrameDecoder {
             "-pix_fmt".into(), "rgb24".into(),
             "-".into(),
         ];
-        if (sw as i64) < out_w as i64 || (sh as i64) < out_h as i64 {
-            args[7] = format!("scale={out_w}:{out_h}:force_original_aspect_ratio=increase:flags=lanczos");
-        }
+
         let mut child = Command::new("ffmpeg")
             .args(&args)
             .stdout(Stdio::piped())
@@ -118,9 +116,16 @@ impl VideoEncoder {
             }
             None => {}
         }
-        cmd.args(["-c:v", "libx264",
+        cmd.args(["-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int",
+                  "-c:v", "libx264",
                   "-preset", preset,
                   "-crf", &crf.to_string(),
+                  "-tune", "film",
+                  "-x264-params", "aq-mode=3:aq-strength=0.9:deblock=-1,-1",
+                  "-colorspace", "bt709",
+                  "-color_primaries", "bt709",
+                  "-color_trc", "bt709",
+                  "-color_range", "tv",
                   "-pix_fmt", "yuv420p",
                   "-profile:v", "high",
                   "-movflags", "+faststart"]);

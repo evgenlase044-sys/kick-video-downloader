@@ -29,11 +29,23 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 # Project fonts (viral display faces with Cyrillic) ship in ./fonts via a
 # local fonts.conf so no admin install into C:\Windows\Fonts is needed.
 FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
-if "FONTCONFIG_PATH" not in os.environ and sys.platform == "win32":
-    if os.path.exists(os.path.join(FONTS_DIR, "fonts.conf")):
-        os.environ["FONTCONFIG_PATH"] = FONTS_DIR
-    else:
-        os.environ["FONTCONFIG_PATH"] = r"C:\Windows\Fonts"
+os.environ["FONTCONFIG_PATH"] = FONTS_DIR
+try:
+    import tempfile
+    _fc_cache = os.path.join(tempfile.gettempdir(), "fontconfig-cache")
+    os.makedirs(_fc_cache, exist_ok=True)
+    _conf_xml = f"""<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>{FONTS_DIR}</dir>
+  <dir>C:\\Windows\\Fonts</dir>
+  <cachedir>{_fc_cache}</cachedir>
+</fontconfig>
+"""
+    with open(os.path.join(FONTS_DIR, "fonts.conf"), "w", encoding="utf-8") as _fconf:
+        _fconf.write(_conf_xml)
+except Exception:
+    pass
 
 import requests
 
@@ -481,9 +493,10 @@ def prepare_image(req: PrepareImageRequest):
             ["ffmpeg", "-y", "-loop", "1", "-framerate", "30", "-i", src,
              "-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo:d={dur:.2f}",
              "-t", f"{dur:.2f}",
-             "-vf", "scale=1280:-2:flags=lanczos,scale=trunc(iw/2)*2:trunc(ih/2)*2",
-             "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
-             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest",
+             "-vf", "scale='min(1920,iw)':-2:flags=lanczos+accurate_rnd,scale=trunc(iw/2)*2:trunc(ih/2)*2",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p",
+             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
+             "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", "-shortest",
              out_path],
             capture_output=True, text=True, timeout=120,
         )
@@ -787,9 +800,9 @@ def build_segments_from_words(words: List[Dict[str, Any]], base_offset: float = 
             dur = w["end"] - current_words[0]["start"]
             last_word = current_words[-1]["word"].strip()
             if (
-                pause > 0.4
-                or count >= 5
-                or dur >= 2.5
+                pause > 0.35
+                or count >= 3
+                or dur >= 1.5
                 or last_word.endswith(('.', '?', '!', '...'))
             ):
                 should_split = True
@@ -1270,24 +1283,25 @@ class ExportPackRequest(BaseModel):
     clips: List[ExportClipItem]
 
 def generate_ass_subtitle_content(subtitles: List[Dict[str, Any]], template_id: str = "meme") -> str:
-    """Generates ASS subtitles formatted for viral vertical shorts."""
-    style_def = "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2.5,0.5,2,20,20,110,1"
+    """Generates ASS subtitles formatted for viral vertical shorts in full 1080x1920."""
+    font = "Montserrat ExtraBold"
+    style_def = f"Style: Default,{font},58,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,3,2,30,30,220,1"
     if template_id == "meme":
-        style_def = "Style: Default,Impact,24,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3.5,1,2,20,20,110,1"
+        style_def = f"Style: Default,{font},64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,4,2,30,30,220,1"
     elif template_id == "karaoke":
-        style_def = "Style: Default,Impact,24,&H0038D7C1,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3.5,1,2,20,20,110,1"
+        style_def = f"Style: Default,{font},64,&H0038D7C1,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,4,2,30,30,220,1"
     elif template_id == "highlight":
-        style_def = "Style: Default,Arial,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2.5,1,2,20,20,110,1"
+        style_def = f"Style: Default,{font},60,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,30,30,220,1"
     elif template_id == "news":
-        style_def = "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00171D22,&HB0171D22,1,0,0,0,100,100,0,0,3,1,0,2,20,20,110,1"
+        style_def = f"Style: Default,{font},52,&H00FFFFFF,&H000000FF,&H00171D22,&HB0171D22,-1,0,0,0,100,100,0,0,3,3,0,2,30,30,220,1"
     elif template_id == "accent":
-        style_def = "Style: Default,Impact,24,&H0008B9FF,&H000000FF,&H00171D22,&H80000000,1,0,0,0,100,100,0,0,1,3,1,2,20,20,110,1"
+        style_def = f"Style: Default,{font},64,&H0008B9FF,&H000000FF,&H00171D22,&H80000000,-1,0,0,0,100,100,0,0,1,7,3,2,30,30,220,1"
 
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
-        "PlayResX: 576",
-        "PlayResY: 1024",
+        "PlayResX: 1080",
+        "PlayResY: 1920",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
@@ -1298,12 +1312,23 @@ def generate_ass_subtitle_content(subtitles: List[Dict[str, Any]], template_id: 
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
     ]
 
-    def fmt_ass_time(sec: float) -> str:
+    def fmt_ass_time(sec: float, fps: int = 60) -> str:
         s = max(0.0, sec)
+        frame = round(s * fps)
+        s = frame / fps
         h = int(s // 3600)
         m = int((s % 3600) // 60)
         sc = int(s % 60)
         cs = int(round((s - int(s)) * 100))
+        if cs >= 100:
+            sc += 1
+            cs = 0
+            if sc >= 60:
+                m += 1
+                sc = 0
+                if m >= 60:
+                    h += 1
+                    m = 0
         return f"{h}:{m:02d}:{sc:02d}.{cs:02d}"
 
     for sub in subtitles:
@@ -1313,7 +1338,7 @@ def generate_ass_subtitle_content(subtitles: List[Dict[str, Any]], template_id: 
                 w_start = fmt_ass_time(w.get("start", 0))
                 w_end = fmt_ass_time(w.get("end", 0))
                 w_text = w.get("word", "").strip().upper()
-                pop_text = f"{{\\t(0,80,\\fscx115\\fscy115)}}{w_text}"
+                pop_text = f"{{\\fscx75\\fscy75\\t(0,90,\\fscx110\\fscy110)\\t(90,160,\\fscx100\\fscy100)}}{w_text}"
                 lines.append(f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,{pop_text}")
         else:
             s_start = fmt_ass_time(sub.get("start", 0))
@@ -1321,7 +1346,8 @@ def generate_ass_subtitle_content(subtitles: List[Dict[str, Any]], template_id: 
             text = sub.get("text", "").strip()
             if template_id in ("meme", "karaoke"):
                 text = text.upper()
-            lines.append(f"Dialogue: 0,{s_start},{s_end},Default,,0,0,0,,{text}")
+            pop_text = f"{{\\fscx80\\fscy80\\t(0,90,\\fscx108\\fscy108)\\t(90,160,\\fscx100\\fscy100)}}{text}"
+            lines.append(f"Dialogue: 0,{s_start},{s_end},Default,,0,0,0,,{pop_text}")
 
     return "\n".join(lines)
 
@@ -1504,12 +1530,14 @@ TV_SUB_FONTS = {
     "Onest Black", "Wix Madefor Display ExtraBold",
 }
 # Fonts without Cyrillic glyphs: substitute a close display face for RU text
-FONT_NO_CYR = {"Anton", "Bebas Neue", "Impact", "Arial Black"}
+FONT_NO_CYR = {"Anton", "Bebas Neue", "Impact", "Arial Black", "Bangers"}
 CYR_FALLBACK = {
     "Anton": "Montserrat ExtraBold",
     "Bebas Neue": "Montserrat ExtraBold",
     "Impact": "Montserrat ExtraBold",
     "Arial Black": "Montserrat ExtraBold",
+    "Bangers": "Montserrat ExtraBold",
+    "Montserrat Black": "Montserrat ExtraBold",
 }
 
 def _text_has_cyrillic(subtitles: List[Dict[str, Any]]) -> bool:
@@ -1521,14 +1549,15 @@ def _text_has_cyrillic(subtitles: List[Dict[str, Any]]) -> bool:
     return False
 
 def _resolve_font(font: str, has_cyr: bool) -> str:
-    font = font if font in TV_SUB_FONTS else "Anton"
+    font = font if font in TV_SUB_FONTS else "Montserrat ExtraBold"
     if has_cyr and font in FONT_NO_CYR:
-        return CYR_FALLBACK.get(font, "Oswald Bold")
+        return CYR_FALLBACK.get(font, "Montserrat ExtraBold")
     return font
 
 
 # ── Exact per-letter advance widths (fontTools metrics) for per-letter anims ──
 _FONT_FILE_FOR = {
+    "Bangers": "Bangers-Regular.ttf",
     "Anton": "anton-Anton-Regular.ttf",
     "Bebas Neue": "bebasneue-BebasNeue-Regular.ttf",
     "Russo One": "russoone-RussoOne-Regular.ttf",
@@ -1537,6 +1566,7 @@ _FONT_FILE_FOR = {
     "Oswald Bold": "oswald-oswald-bold.ttf",
     "Montserrat": "montserrat-montserrat-extrabold.ttf",
     "Montserrat ExtraBold": "montserrat-montserrat-extrabold.ttf",
+    "Montserrat Black": "montserrat-montserrat-extrabold.ttf",
     "Unbounded": "unbounded-unbounded-extrabold.ttf",
     "Unbounded ExtraBold": "unbounded-unbounded-extrabold.ttf",
     "Lobster": "lobster-Lobster-Regular.ttf",
@@ -1607,7 +1637,6 @@ def _letter_positions(font: str, size_px: float, text: str, out_w: int, spacing:
     total = sum(ws) + spacing * max(0, len(text) - 1)
     x = (out_w - total) / 2.0
     pos = []
-        # живые анимации: покачивание текста + «дыхание» свечения (не статично)
     for w in ws:
         pos.append(x + w / 2.0)
         x += w + spacing
@@ -1641,7 +1670,6 @@ def _is_hot_word(word: str) -> bool:
     clean = "".join(ch for ch in str(word) if ch.isalnum())
     return len(clean) >= 5
 
-
 def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int, margin_v: int,
                            font: str = "Montserrat ExtraBold", size_mul: float = 1.0,
                            glow: float = 55.0, anim: str = "pop",
@@ -1674,9 +1702,9 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
         t_outcol = c.get("outline_color", "&H00000000")
         t_backcol = c.get("back_color", "&H00000000")
         t_border = c.get("border_style", 1)
-        t_outline = int(max(3, c.get("outline", 7) * size_mul))
+        t_outline = int(max(4, c.get("outline", 7) * size_mul * 0.85))
         t_spacing = c.get("spacing", 0)
-        t_shadow = c.get("shadow", 0)
+        t_shadow = int(max(2, base_fontsize * 0.04))
 
         main_style = (f"Style: Main_{tid},{t_font},{base_fontsize},{t_primary},&H000000FF,{t_outcol},{t_backcol},"
                       f"-1,0,0,0,100,100,{t_spacing},0,{t_border},{t_outline},{t_shadow},2,{int(out_w*0.03)},{int(out_w*0.03)},{margin_v},1")
@@ -1698,9 +1726,9 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
 
         if c.get("glow") or tid in ("acid", "purple_phonk", "sunset_drift", "rage_red", "golden_luxury", "lime", "cyan", "yellow", "white", "red", "violet"):
             gcol = c.get("glow_color", t_primary)
-            g_blur = max(14, int(base_fontsize * 0.24 * gk))
+            g_outline = max(3, int(base_fontsize * 0.05 * gk))
             glow_style = (f"Style: Glow_{tid},{t_font},{base_fontsize},{gcol},&H000000FF,{gcol},{gcol},"
-                          f"-1,0,0,0,100,100,{t_spacing},0,1,{g_blur},0,2,{int(out_w*0.03)},{int(out_w*0.03)},{margin_v},1")
+                          f"-1,0,0,0,100,100,{t_spacing},0,1,{g_outline},0,2,{int(out_w*0.03)},{int(out_w*0.03)},{margin_v},1")
             header_styles.append(glow_style)
 
         if c.get("is_spotlight"):
@@ -1724,12 +1752,23 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
     ]
 
-    def fmt_ass_time(sec: float) -> str:
+    def fmt_ass_time(sec: float, fps: int = 60) -> str:
         s = max(0.0, sec)
+        frame = round(s * fps)
+        s = frame / fps
         h = int(s // 3600)
         m = int((s % 3600) // 60)
         sc = int(s % 60)
         cs = int(round((s - int(s)) * 100))
+        if cs >= 100:
+            sc += 1
+            cs = 0
+            if sc >= 60:
+                m += 1
+                sc = 0
+                if m >= 60:
+                    h += 1
+                    m = 0
         return f"{h}:{m:02d}:{sc:02d}.{cs:02d}"
 
     base_y = out_h - margin_v - int(base_fontsize * 0.35)
@@ -1746,8 +1785,6 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
         words = sub.get("words") or []
         full_text = str(sub.get("text", "")).strip().upper()
 
-        # Ручная позиция клипа (перетаскивание на превью): 0..1 доли кадра.
-        # Если задана — центр текста ставится через \\pos в эту точку.
         try:
             sxv = float(sub.get("x"))
             syv = float(sub.get("y"))
@@ -1757,7 +1794,16 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
         except (TypeError, ValueError):
             sub_pos = None
 
-        # Box templates render cleanly as full phrase lines with badge styling
+        # Pick single most impactful hot word in this cue (longest meaningful word)
+        hot_idx = -1
+        if hot_words and words:
+            longest_len = 0
+            for idx, w in enumerate(words):
+                clean = "".join(ch for ch in str(w.get("word", "")).strip() if ch.isalnum())
+                if len(clean) >= 5 and len(clean) > longest_len:
+                    longest_len = len(clean)
+                    hot_idx = idx
+
         if words and not t_cfg.get("is_box") and t_cfg.get("anim") != "type" and anim != "type":
             items = []
             for i, w in enumerate(words):
@@ -1788,40 +1834,30 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
                 except (TypeError, ValueError):
                     pass
 
-            # Per-letter animations for phrase lines
-            if anim == "wave" and 1 < len(wt) <= 16:
-                xs = _letter_positions(cur_font, base_fontsize, wt, out_w)
-                for i, ch in enumerate(wt):
-                    x = xs[i]
-                    d0 = min(max(0, dur_ms - 280), i * 65)
-                    wave_t = f"\\t({d0},{d0+120},\\pos({x:.1f},{base_y-14:.1f}))\\t({d0+120},{d0+240},\\pos({x:.1f},{base_y:.1f}))"
-                    tag_m = f"{{\\an5\\blur0.8\\fad(25,{out_fade})\\pos({x:.1f},{base_y:.1f}){wave_t}}}"
-                    if cur_cfg.get("glow") or wsid in ("acid", "purple_phonk", "sunset_drift"):
-                        lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur16\\pos({x:.1f},{base_y:.1f}){wave_t}}}{ch}")
-                        lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}\\3a&H55&\\1a&H55&}}{ch}")
-                continue
+            # Universal spring pop animation tag or specific viral animation
+            if anim == "pop":
+                pop_tag = "\\fscx68\\fscy68\\t(0,90,\\fscx112\\fscy112)\\t(90,160,\\fscx100\\fscy100)"
+            elif anim == "rise":
+                pop_tag = "\\fscy60\\t(0,100,\\fscy110)\\t(100,160,\\fscy100)"
+            elif anim == "wave":
+                pop_tag = "\\frz-3\\fscx90\\fscy90\\t(0,80,\\frz3\\fscx110\\fscy110)\\t(80,160,\\frz0\\fscx100\\fscy100)"
+            elif anim == "shimmer":
+                pop_tag = "\\fscx92\\fscy92\\t(0,90,\\fscx106\\fscy106)\\t(90,160,\\fscx100\\fscy100)"
+            elif anim == "tremble":
+                pop_tag = "\\frz2\\t(0,40,\\frz-2)\\t(40,80,\\frz1.5)\\t(80,120,\\frz-1)\\t(120,160,\\frz0)"
+            elif anim == "spin":
+                pop_tag = "\\frz-15\\fscx50\\fscy50\\t(0,110,\\frz3\\fscx110\\fscy110)\\t(110,170,\\frz0\\fscx100\\fscy100)"
+            elif anim == "none":
+                pop_tag = ""
+            else:
+                pop_tag = "\\fscx68\\fscy68\\t(0,90,\\fscx112\\fscy112)\\t(90,160,\\fscx100\\fscy100)"
 
-            if anim == "type" and 1 < len(wt) <= 24:
-                xs = _letter_positions(cur_font, base_fontsize, wt, out_w)
-                per = max(40, min(140, (dur_ms - 100) // max(1, len(wt))))
-                for i, ch in enumerate(wt):
-                    x = xs[i]
-                    ls = ws + i * per / 1000.0
-                    if ls >= we - 0.04:
-                        break
-                    tag_m = f"{{\\an5\\blur0.8\\fad(15,{out_fade})\\pos({x:.1f},{base_y:.1f})\\fscx120\\fscy120\\t(0,70,\\fscx100\\fscy100)}}"
-                    if cur_cfg.get("glow") or wsid in ("acid", "purple_phonk", "sunset_drift"):
-                        lines.append(f"Dialogue: 0,{fmt_ass_time(ls)},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur16\\pos({x:.1f},{base_y:.1f})}}{ch}")
-                    lines.append(f"Dialogue: 1,{fmt_ass_time(ls)},{te},Main_{wsid},,0,0,0,,{tag_m}{ch}")
-                continue
-
-            # 1. MrBeast 3D: multi-layer isometric shadow extrusion + tilt + color cycling
+            # 1. MrBeast 3D
             if cur_cfg.get("is_3d"):
                 tilt = cur_cfg.get("tilt", -4)
                 alt = cur_cfg.get("alt_colors", ["&H0000E6FF", "&H00FFF200", "&H00FFFFFF"])
                 col = alt[widx % len(alt)]
                 col_tag = f"\\1c{col[2:]}&"
-                pop_tag = "\\fscx65\\fscy65\\t(0,90,\\fscx115\\fscy115)\\t(90,170,\\fscx100\\fscy100)"
                 for si in range(1, 5):
                     off = si * 2
                     tag_sh = f"{{\\an5\\frz{tilt}\\pos({cx+off},{base_y+off}){pop_tag}}}"
@@ -1829,121 +1865,76 @@ def build_tv_subtitles_ass(remapped_subs, style_id: str, out_w: int, out_h: int,
                 tag_m = f"{{\\an5\\frz{tilt}\\pos({cx},{base_y})\\fad(20,{out_fade}){col_tag}{pop_tag}}}"
                 lines.append(f"Dialogue: 4,{ts},{te},Main_{wsid},,0,0,0,,{tag_m}{wt}")
 
-            # 2. Cyber Glitch: chromatic cyan/magenta split + jitter
+            # 2. Cyber Glitch
             elif cur_cfg.get("is_glitch"):
                 j_tag = "\\t(0,60,\\frz1\\fscx104\\fscy104)\\t(60,120,\\frz-1\\fscx100\\fscy100)\\t(120,180,\\frz0)"
                 lines.append(f"Dialogue: 0,{ts},{te},GlitchMag_{wsid},,0,0,0,,{{\\an5\\blur1.5\\pos({cx+5},{base_y}){j_tag}}}{wt}")
                 lines.append(f"Dialogue: 1,{ts},{te},GlitchCyan_{wsid},,0,0,0,,{{\\an5\\blur1.5\\pos({cx-5},{base_y}){j_tag}}}{wt}")
                 lines.append(f"Dialogue: 2,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y}){j_tag}\\fad(15,{out_fade})}}{wt}")
 
-            # 3. Comic Pop-Art: -6deg tilt, 12px comic outline, squash-stretch
+            # 3. Comic Pop-Art
             elif wsid == "comic_pop":
                 tilt = cur_cfg.get("tilt", -6)
-                pop_tag = f"\\frz{tilt}\\fscx112\\fscy112\\t(0,90,\\fscx95\\fscy122)\\t(90,170,\\fscx100\\fscy100)"
-                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y})\\fad(20,{out_fade}){pop_tag}}}{wt}")
+                cpop_tag = f"\\frz{tilt}\\fscx112\\fscy112\\t(0,90,\\fscx95\\fscy122)\\t(90,170,\\fscx100\\fscy100)"
+                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y})\\fad(20,{out_fade}){cpop_tag}}}{wt}")
 
-            # 4. Golden Luxury: champagne gold, tracking, soft warm glow, smooth glide
+            # 4. Golden Luxury
             elif wsid == "golden_luxury":
-                glide = f"\\move({cx},{base_y+20},{cx},{base_y},0,{min(200, dur_ms)})"
-                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur16\\fsp4{glide}\\fad(40,{out_fade})}}{wt}")
-                lines.append(f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\fsp4{glide}\\fad(40,{out_fade})}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur16\\fsp4{pos_tag}\\fad(40,{out_fade}){pop_tag}}}{wt}")
+                lines.append(f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\fsp4{pos_tag}\\fad(40,{out_fade}){pop_tag}}}{wt}")
 
-            # 5. Rage Red: crimson, burning halo, earthquake slam + shake
+            # 5. Rage Red
             elif wsid == "rage_red":
                 slam = "\\fscx140\\fscy140\\t(0,80,\\fscx100\\fscy100)\\t(80,140,\\frz2.5)\\t(140,200,\\frz-2)\\t(200,260,\\frz0)"
-                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur22\\pos({cx},{base_y}){slam}}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,{{\\an5\\blur20\\pos({cx},{base_y}){slam}}}{wt}")
                 lines.append(f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y}){slam}\\fad(10,{out_fade})}}{wt}")
 
-            # 6. Pill Boxes (Hormozi / Clean Editorial / Terminal)
+            # 6. Pill Boxes (Hormozi / Clean Editorial)
             elif cur_cfg.get("is_box"):
-                pop_tag = "\\fscx80\\fscy80\\t(0,90,\\fscx110\\fscy110)\\t(90,160,\\fscx100\\fscy100)"
-                if hot_words and _is_hot_word(wt):
+                hot = hot_words and (widx == hot_idx)
+                if hot:
                     hot_col = cur_cfg.get("hot_color", "&H0014FF39")
                     col_tag = f"\\1c{hot_col[2:]}&"
                 else:
                     col_tag = ""
-                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y})\\fad(25,{out_fade}){col_tag}{pop_tag}}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,{{\\an5{pos_tag}\\fad(25,{out_fade}){col_tag}{pop_tag}}}{wt}")
 
-            # 7. Spotlight Pulse: active word neon jump
+            # 7. Spotlight Pulse
             elif cur_cfg.get("is_spotlight"):
-                pop_tag = "\\fscx120\\fscy120\\t(100,200,\\fscx100\\fscy100)"
-                lines.append(f"Dialogue: 0,{ts},{te},SpotActive_{wsid},,0,0,0,,{{\\an5\\pos({cx},{base_y})\\fad(20,{out_fade}){pop_tag}}}{wt}")
+                lines.append(f"Dialogue: 0,{ts},{te},SpotActive_{wsid},,0,0,0,,{{\\an5{pos_tag}\\fad(20,{out_fade}){pop_tag}}}{wt}")
 
-            # 8. Standard Glowing TV styles (Acid / Phonk / Sunset / legacy colors)
-            # Живой рендер: мягкое «дышащее» свечение, волновое движение,
-            # побуквенная печать из центра для длинных слов, вариация обводки.
+            # 8. Standard Glowing TV styles (Acid / Phonk / Sunset / Lime / Cyan, etc.)
             else:
-                hot = hot_words and _is_hot_word(wt)
+                hot = hot_words and (widx == hot_idx)
                 if hot:
                     hcol = cur_cfg.get("hot_color", "&H0000E6FF")
                     col_tag = f"\\1c&H{hcol[-6:]}&"
                     gcol = hcol
-                    bord_tag = f"\\bord{max(4, int(cur_cfg.get('outline', 7) * 0.9)):.1f}"
+                    bord_tag = f"\\bord{max(3.8, base_fontsize * 0.075):.1f}\\3c&H000000&\\shad{max(2.2, base_fontsize * 0.04):.1f}\\4c&H000000&\\4a&H50&"
                 else:
                     col_tag = ""
                     gcol = cur_cfg.get("glow_color", cur_cfg.get("primary", "&H0014FF39"))
-                    # вариация: каждое второе слово — вообще без обводки (только свечение)
-                    bord_tag = "\\bord0" if widx % 2 == 0 else f"\\bord{max(2.5, int(cur_cfg.get('outline', 7) * 0.35)):.1f}"
+                    # Always keep crisp dark border and shadow for readability - never bord0!
+                    bord_tag = f"\\bord{max(3.2, base_fontsize * 0.065):.1f}\\3c&H000000&\\shad{max(2.0, base_fontsize * 0.038):.1f}\\4c&H000000&\\4a&H60&"
 
-                float_amp = max(3, int(base_fontsize * 0.06))
-                n_ph = max(2, min(6, int(dur_ms / 320) or 2))
-                seg = dur_ms // n_ph
+                core_b = max(3, int(base_fontsize * 0.05 * gk))
+                wide_b = max(8, int(base_fontsize * 0.14 * gk))
 
-                def breath(base_blur, hi_a, lo_a):
-                    t = []
-                    for k in range(n_ph):
-                        t0, t1 = k * seg, (k + 1) * seg
-                        if k % 2 == 0:
-                            t.append(f"\\t({t0},{t1},\\blur{base_blur * 1.15:.1f}\\1a&H{lo_a}&)")
-                        else:
-                            t.append(f"\\t({t0},{t1},\\blur{base_blur:.1f}\\1a&H{hi_a}&)")
-                    return "".join(t)
-
-                wide_b = max(9, int(base_fontsize * 0.11))
-                core_b = max(2, int(base_fontsize * 0.028))
-
-                if len(wt) >= 4 and dur_ms >= 500:
-                    # побуквенная печать из центра: буквы вылетают из центра слова,
-                    # увеличиваясь до своего размера
-                    per = max(35, min(110, (dur_ms - 250) // max(1, len(wt))))
-                    xs = _letter_positions(cur_font, base_fontsize, wt, out_w)
-                    for i, ch in enumerate(wt):
-                        x = xs[i] if i < len(xs) else cx
-                        ls = ws + i * per / 1000.0
-                        lts, lte = fmt_ass_time(ls), fmt_ass_time(we)
-                        grow = f"\\move({cx:.0f},{base_y:.0f},{x:.0f},{base_y:.0f},0,140)\\fscx25\\fscy25\\t(0,140,\\fscx100\\fscy100)"
-                        lines.append(
-                            f"Dialogue: 0,{lts},{lte},Glow_{wsid},,0,0,0,,"
-                            f"{{\\an5{grow}\\blur{wide_b}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\1a&H95&}}{ch}"
-                        )
-                        lines.append(
-                            f"Dialogue: 1,{lts},{lte},Main_{wsid},,0,0,0,,"
-                            f"{{\\an5{grow}\\fad(15,{out_fade})\\3c&H000000&{bord_tag}{col_tag}}}{ch}"
-                        )
-                    continue
-
-                # обычные слова: pop + волновое движение (плывут по волнам)
-                wave_tag = ""
-                for k in range(n_ph):
-                    t0, t1 = k * seg, (k + 1) * seg
-                    dy = float_amp if k % 2 == 0 else -float_amp
-                    wave_tag += f"\\t({t0},{t1},\\pos({cx:.0f},{base_y - dy:.0f}))"
-
+                # Ambient soft glow (bottom layer)
                 lines.append(
                     f"Dialogue: 0,{ts},{te},Glow_{wsid},,0,0,0,,"
-                    f"{{\\an5{pos_tag}\\blur{wide_b}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\1a&H95&{wave_tag}}}{wt}"
+                    f"{{\\an5{pos_tag}\\blur{wide_b}\\bord{core_b}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\1a&HA0&\\3a&HA0&{pop_tag}}}{wt}"
                 )
+                # Tight intense glow (middle layer)
                 lines.append(
-                    f"Dialogue: 0,{ts},{te},Main_{wsid},,0,0,0,,"
-                    f"{{\\an5\\pos({cx + 5:.0f},{base_y + 7:.0f})\\bord2\\3c&H000000&\\1c&H000000&\\blur1.2{wave_tag}}}{wt}"
+                    f"Dialogue: 1,{ts},{te},Glow_{wsid},,0,0,0,,"
+                    f"{{\\an5{pos_tag}\\blur{core_b}\\bord{max(2, core_b//2)}\\1c&H{gcol[-6:]}&\\3c&H{gcol[-6:]}&\\1a&H50&\\3a&H50&{pop_tag}}}{wt}"
                 )
+                # Main text with crisp dark outline and shadow (top layer)
                 lines.append(
-                    f"Dialogue: 1,{ts},{te},Main_{wsid},,0,0,0,,"
-                    f"{{\\an5{pos_tag}\\fad(20,{out_fade})\\3c&H000000&{bord_tag}{col_tag}{wave_tag}}}{wt}"
+                    f"Dialogue: 2,{ts},{te},Main_{wsid},,0,0,0,,"
+                    f"{{\\an5{pos_tag}\\fad(15,{out_fade}){bord_tag}{col_tag}{pop_tag}}}{wt}"
                 )
-
-
-
 
     return "\n".join(lines)
 def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h: int) -> str:
@@ -1991,12 +1982,23 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
     lines += ["", "[Events]",
               "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
 
-    def fmt_ass_time(sec: float) -> str:
+    def fmt_ass_time(sec: float, fps: int = 60) -> str:
         s = max(0.0, sec)
+        frame = round(s * fps)
+        s = frame / fps
         h = int(s // 3600)
         m = int((s % 3600) // 60)
         sc = int(s % 60)
         cs = int(round((s - int(s)) * 100))
+        if cs >= 100:
+            sc += 1
+            cs = 0
+            if sc >= 60:
+                m += 1
+                sc = 0
+                if m >= 60:
+                    h += 1
+                    m = 0
         return f"{h}:{m:02d}:{sc:02d}.{cs:02d}"
 
     def hex_to_ass(c: str, default: str = "&H00FFFFFF") -> str:
@@ -2061,43 +2063,45 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
 
         style = f"TXT_{fam.replace(' ', '_')}_{size}"
         px, py = fx * out_w, fy * out_h
-        pos = f"\\pos({px:.0f},{py:.0f})"
         nph = max(2, min(6, dur_ms // 350))
         seg = dur_ms // nph
+
+        # Clean sway breathing
         sway = ""
         for k in range(nph):
             t0, t1 = k * seg, (k + 1) * seg
-            dx = 4 if k % 2 == 0 else -3
-            dy = 3 if k % 2 else -2
-        sway += B2 + "t(" + str(t0) + "," + str(t1) + "," + B2 + "pos(" + str(px + dx) + "," + str(py + dy) + "))"
+            rz = 1.0 if k % 2 == 0 else -1.0
+            sway += f"\\t({t0},{t1},\\frz{rz:.1f})"
+
+        # Clean glow breathing
         gb_osc = ""
         for k in range(nph):
             t0, t1 = k * seg, (k + 1) * seg
-        gbv = size * 0.26 * (glow / 60.0) * (1.3 if k % 2 == 0 else 0.7)
-        gb_osc += B2 + "t(" + str(t0) + "," + str(t1) + "," + B2 + "blur" + str(round(gbv, 1)) + ")"
+            gbv = size * 0.26 * (glow / 60.0) * (1.2 if k % 2 == 0 else 0.8)
+            gb_osc += f"\\t({t0},{t1},\\blur{max(1.0, gbv):.1f})"
 
         in_map = {
-            "none":   f"\\fad({in_ms if anim_in != 'none' else 0},0)",
-            "pop":    f"\\fad({int(in_ms*0.5)},0)\\fscx35\\fscy35\\t(0,{in_ms},\\fscx114\\fscy114)\\t({in_ms},{in_ms+70},\\fscx100\\fscy100)",
-            "rise":   f"\\fad({in_ms},0)\\move({px:.0f},{py+size*0.75:.0f},{px:.0f},{py:.0f},0,{in_ms})",
-            "spin":   f"\\fad({int(in_ms*0.6)},0)\\frz-14\\fscx55\\fscy55\\t(0,{in_ms+80},\\frz0\\fscx100\\fscy100)",
-            "slide":  f"\\fad({int(in_ms*0.6)},0)\\move({px-out_w*0.2:.0f},{py:.0f},{px:.0f},{py:.0f},0,{in_ms})",
+            "none": f"\\fad({in_ms if anim_in != 'none' else 0},0)",
+            "pop": f"\\fad({int(in_ms*0.5)},0)\\fscx35\\fscy35\\t(0,{in_ms},\\fscx114\\fscy114)\\t({in_ms},{in_ms+70},\\fscx100\\fscy100)",
+            "rise": f"\\fad({in_ms},0)\\move({px:.0f},{py+size*0.75:.0f},{px:.0f},{py:.0f},0,{in_ms})",
+            "spin": f"\\fad({int(in_ms*0.6)},0)\\frz-14\\fscx55\\fscy55\\t(0,{in_ms+80},\\frz0\\fscx100\\fscy100)",
+            "slide": f"\\fad({int(in_ms*0.6)},0)\\move({px-out_w*0.2:.0f},{py:.0f},{px:.0f},{py:.0f},0,{in_ms})",
             "slide_r": f"\\fad({int(in_ms*0.6)},0)\\move({px+out_w*0.2:.0f},{py:.0f},{px:.0f},{py:.0f},0,{in_ms})",
-            "wave":   f"\\fad({in_ms},0)\\fscy60\\fscx60\\t(0,{in_ms},\\fscy115\\fscy115)\\t({in_ms},{in_ms+120},\\fscy100\\fscy100)",
+            "wave": f"\\fad({in_ms},0)\\fscx60\\fscy60\\t(0,{in_ms},\\fscx112\\fscy112)\\t({in_ms},{in_ms+100},\\fscx100\\fscy100)",
             "bounce": f"\\fad({int(in_ms*0.5)},0)\\move({px:.0f},{py-size*1.8:.0f},{px:.0f},{py:.0f},0,{in_ms})\\frz6\\t({in_ms},{in_ms+180},\\frz0)",
-            "zoom":   f"\\fad({int(in_ms*0.4)},0)\\fscx200\\fscy200\\blur6\\t(0,{in_ms+90},\\fscx100\\fscy100\\blur0.8)",
+            "zoom": f"\\fad({int(in_ms*0.4)},0)\\fscx200\\fscy200\\blur6\\t(0,{in_ms+90},\\fscx100\\fscy100\\blur0.8)",
         }
         in_tag = in_map.get(anim_in, in_map["pop"])
 
         o0 = dur_ms - out_ms
         out_map = {
-            "none":     "",
-            "fade":     f"\\t({o0},{dur_ms},\\alpha&HFF&)",
-            "shrink":   f"\\t({o0},{dur_ms},\\fscx30\\fscy30\\alpha&H80&)",
-            "slideout": f"\\t({o0},{dur_ms},\\move({px:.0f},{py:.0f},{px+out_w*0.2:.0f},{py:.0f},{o0},{dur_ms})\\alpha&H60&)",
-            "blurout":  f"\\t({o0},{dur_ms},\\blur8\\alpha&HFF&)",
-            "spinout":  f"\\t({o0},{dur_ms},\\frz12\\fscx40\\fscy40\\alpha&H80&)",
-            "riseout":  f"\\t({o0},{dur_ms},\\move({px:.0f},{py:.0f},{px:.0f},{py-size*0.8:.0f},{o0},{dur_ms})\\alpha&H60&)",
+            "none": "",
+            "fade": f"\\t({o0},{dur_ms},\\alpha&HFF&)",
+            "shrink": f"\\t({o0},{dur_ms},\\fscx20\\fscy20\\alpha&HFF&)",
+            "slideout": f"\\t({o0},{dur_ms},\\fscx115\\fscy20\\alpha&HFF&)",
+            "blurout": f"\\t({o0},{dur_ms},\\blur12\\alpha&HFF&)",
+            "spinout": f"\\t({o0},{dur_ms},\\frz25\\fscx20\\fscy20\\alpha&HFF&)",
+            "riseout": f"\\t({o0},{dur_ms},\\fscy140\\fscx70\\alpha&HFF&)",
         }
         out_tag = out_map.get(anim_out, out_map["fade"])
 
@@ -2106,10 +2110,13 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
             shake_tag = ("\\t(0,%d,\\frz1.8\\fsp0.5)\\t(%d,%d,\\frz-1.6\\fsp-0.3)"
                          % (dur_ms // 3, dur_ms // 3, 2 * dur_ms // 3))
 
-        gb1 = max(10, int(size * 0.26 * (glow / 60.0)))
-        gb2 = max(5, int(size * 0.12 * (glow / 60.0)))
+        gb1 = max(8, int(size * 0.16 * (glow / 60.0)))
+        gb2 = max(4, int(size * 0.08 * (glow / 60.0)))
         sh_off = max(3, int(size * 0.055))
         sh_bord = max(2, int(size * 0.05))
+
+        uses_move = anim_in in ("rise", "slide", "slide_r", "bounce")
+        pos_tag = "" if uses_move else f"\\pos({px:.0f},{py:.0f})"
 
         if anim_in == "type" and 1 < len(text.replace("\\N", "")) <= 50:
             per = max(30, min(90, (dur_ms - 200) // len(text)))
@@ -2128,18 +2135,19 @@ def build_text_elements_ass(text_items: List[Dict[str, Any]], out_w: int, out_h:
                 t_start_s = fmt_ass_time(ls)
                 t_end_s = fmt_ass_time(te)
                 if glow > 5:
-                    lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}\\3a&H55&\\1a&H55&}}{ch}")
-                    lines.append(f"Dialogue: 2,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb2}\\blur{gb2}\\3c{glow_color}\\1c{glow_color}\\3a&H20&\\1a&H20&}}{ch}")
-                lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5\\pos({cur_x+sh_off:.0f},{py+sh_off:.0f}){fsp_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H25&\\1a&H25&\\fscx120\\fscy120\\t(0,70,\\fscx100\\fscy100){shake_tag}{out_tag}}}{ch}")
+                    lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}\\3a&H80&\\1a&H80&}}{ch}")
+                    lines.append(f"Dialogue: 2,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb2}\\blur{gb2}\\3c{glow_color}\\1c{glow_color}\\3a&H40&\\1a&H40&}}{ch}")
+                lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5\\pos({cur_x+sh_off:.0f},{py+sh_off:.0f}){fsp_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H40&\\1a&H40&\\fscx120\\fscy120\\t(0,70,\\fscx100\\fscy100){shake_tag}{out_tag}}}{ch}")
                 lines.append(f"Dialogue: 4,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}{stroke_tag}\\3c&H00000000&\\1c{color}}}{ch}")
         else:
-            anim_base = f"\\an5{pos}{in_tag}{out_tag}{shake_tag}{fsp_tag}"
+            anim_base = f"\\an5{pos_tag}{in_tag}{out_tag}{shake_tag}{fsp_tag}"
             t_start_s = fmt_ass_time(ts)
             t_end_s = fmt_ass_time(te)
             if glow > 5:
-                lines.append("Dialogue: 1," + t_start_s + "," + t_end_s + "," + style + ",,0,0,0,,{" + anim_base + "\\bord" + str(gb1) + "\\blur" + str(gb1) + "\\3c" + glow_color + "\\1c" + glow_color + "\\3a&H72&" + "\\1a&H72&" + gb_osc + sway + "}" + text + "")
-            lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5\\pos({px+sh_off:.0f},{py+sh_off:.0f}){in_tag}{out_tag}{shake_tag}{fsp_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H25&\\1a&H25&}}{text}")
-            lines.append("Dialogue: 4," + t_start_s + "," + t_end_s + "," + style + ",,0,0,0,,{" + anim_base + stroke_tag + "\\3c&H00000000&" + "\\1c" + color + sway + "}" + text + "")
+                lines.append(f"Dialogue: 1,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb1}\\blur{gb1}\\3c{glow_color}\\1c{glow_color}\\3a&H80&\\1a&H80&{gb_osc}{sway}}}{text}")
+                lines.append(f"Dialogue: 2,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}\\bord{gb2}\\blur{gb2}\\3c{glow_color}\\1c{glow_color}\\3a&H40&\\1a&H40&{gb_osc}{sway}}}{text}")
+            lines.append(f"Dialogue: 3,{t_start_s},{t_end_s},{style},,0,0,0,,{{\\an5{pos_tag}{in_tag}{out_tag}{shake_tag}{fsp_tag}\\bord{sh_bord}\\3c&H00000000&\\1c&H00000000&\\3a&H40&\\1a&H40&}}{text}")
+            lines.append(f"Dialogue: 4,{t_start_s},{t_end_s},{style},,0,0,0,,{{{anim_base}{stroke_tag}\\3c&H00000000&\\1c{color}{sway}}}{text}")
     return "\n".join(lines)
 
 
@@ -2152,25 +2160,23 @@ def _source_has_audio(path: str) -> bool:
         )
         return bool(r.stdout.strip())
     except Exception:
-        return True  # assume yes on probe failure (old behavior)
+        return True
 
 
 def _tv_grade_parts(src: str, dst: str, is_vertical: bool = True) -> List[str]:
-    """Viral grade: filmic S-curve, ярко-белые света с ощущением засвета
-    (soft RGB bloom на highlights через packed-rgb bright-pass), тёплые тона."""
+    """Viral grade: clean denoise + professional DaVinci tetrahedral 3D LUT + subtle CAS sharpen.
+    Eliminates pulsing brightness, milky bloom, and harsh double unsharp artifacting."""
+    lut_path = os.path.join(BASE_DIR, "tv_grade.cube")
+    if os.path.exists(lut_path):
+        esc_lut = lut_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+        lut_filter = f"lut3d=file='{esc_lut}':interp=tetrahedral,"
+    else:
+        lut_filter = "curves=m='0/0 0.25/0.22 0.5/0.52 0.75/0.78 1/1',"
     chain = (
-        "format=gbrp,"
-        "curves=m='0/0 0.2/0.3 0.5/0.6 0.8/0.96 1/1'"
-        ":r='0/0 0.52/0.55 1/1':b='0/0 0.48/0.5 1/0.97',"
-        "eq=saturation=1.15:brightness=0.05,"
-        "split[a][b];"
-        "[b]format=rgb24,lutrgb=r='clip((val-190)*3,0,255)':g='clip((val-190)*3,0,255)':b='clip((val-190)*3,0,255)',"
-        "format=gbrp,gblur=sigma=10[bh];"
-        "[a]format=gbrp[am];"
-        "[am][bh]blend=all_mode=screen:all_opacity=0.45,"
-        "eq=eval=frame:brightness='0.03+0.035*sin(2*PI*t/0.9)',"
-        "unsharp=5:5:1.3:5:5:0.0,"
-        "cas=0.6,"
+        "hqdn3d=1.2:1.2:5:5,"
+        f"{lut_filter}"
+        "eq=contrast=1.05:saturation=1.10:brightness=0.01,"
+        "cas=0.30,"
         "format=yuv420p"
     )
     return [f"{src}{chain}{dst}"]
@@ -2179,9 +2185,8 @@ def _tv_grade_parts(src: str, dst: str, is_vertical: bool = True) -> List[str]:
 def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverlay],
                     out_w: int, out_h: int, total_dur: float, tag_prefix: str) -> str:
     """Burn FX overlay elements (flash / bars / shake) onto curr_v in order.
-    Returns the new current video label. Shake coupling: an overlapping shake
-    element also shakes cine-bars with the same offsets (borders shake WITH
-    the video)."""
+    Returns the new current video label. Shake uses lanczos to avoid blur;
+    flash uses rapid attack and additive blend for authentic viral impact."""
     for fi, fx in enumerate(fx_list):
         try:
             s0 = max(0.0, float(fx.start))
@@ -2201,14 +2206,13 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             filter_parts.append(
                 f"[{tag_prefix}v{fi}b]crop=iw-{2*a}:ih-{2*a}:"
                 f"x='{a}+{a}*sin(2*PI*{fq:.1f}*t)':y='{a}+{a}*cos(2*PI*{fq*9/7:.1f}*t)',"
-                f"scale={out_w}:{out_h}:flags=bilinear[{tag_prefix}v{fi}s]"
+                f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}s]"
             )
             filter_parts.append(f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
         elif fx.kind == "bars":
             bh = max(20, min(out_h // 3, int(fx.bar_h or 120)))
             prog = f"min(1,min(t-{s0:.3f},{e0:.3f}-t)/0.35)"
-            # couple with any overlapping shake element: borders ride the video shake
             sh_amp, sh_f = 0, 7.0
             for sx in fx_list:
                 if sx.kind != "shake":
@@ -2230,15 +2234,16 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
                 f"[{tag_prefix}m{fi}][{tag_prefix}c{fi}b]overlay=x=0:y='{out_h}-{bh}*{prog}+{sh_y}':enable={en}[{tag_prefix}v{fi}]"
             )
             curr_v = f"[{tag_prefix}v{fi}]"
-        else:  # flash: soft color pulse, peak < 1 so the picture survives
-            peak = max(0.1, min(1.0, float(fx.peak or 0.75)))
-            fd = min(d / 2.0, 0.3)
+        else:  # flash: punchy fast attack, addition/exposure mode
+            peak = max(0.2, min(1.0, float(fx.peak or 0.85)))
+            f_in = min(0.04, d * 0.15)
+            f_out = max(0.08, d - f_in)
             if (fx.color or "white") == "bw":
                 filter_parts.append(f"{curr_v}split=2[{tag_prefix}v{fi}a][{tag_prefix}v{fi}b]")
                 filter_parts.append(
                     f"[{tag_prefix}v{fi}b]hue=s=0,format=rgba,"
-                    f"fade=t=in:st={s0:.3f}:d={fd:.3f}:alpha=1,"
-                    f"fade=t=out:st={e0 - fd:.3f}:d={fd:.3f}:alpha=1,"
+                    f"fade=t=in:st={s0:.3f}:d={f_in:.3f}:alpha=1,"
+                    f"fade=t=out:st={s0+f_in:.3f}:d={f_out:.3f}:alpha=1,"
                     f"colorchannelmixer=aa={peak:g}[{tag_prefix}v{fi}g]"
                 )
                 filter_parts.append(f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}g]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
@@ -2246,11 +2251,11 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
                 cmap = {"white": "white", "green": "0x39FF00", "red": "0xFF2222"}.get(fx.color or "white", "white")
                 filter_parts.append(
                     f"color=c={cmap}:s={out_w}x{out_h}:d={total_dur:.3f},format=rgba,"
-                    f"fade=t=in:st={s0:.3f}:d={fd:.3f}:alpha=1,"
-                    f"fade=t=out:st={e0 - fd:.3f}:d={fd:.3f}:alpha=1,"
+                    f"fade=t=in:st={s0:.3f}:d={f_in:.3f}:alpha=1,"
+                    f"fade=t=out:st={s0+f_in:.3f}:d={f_out:.3f}:alpha=1,"
                     f"colorchannelmixer=aa={peak:g}[{tag_prefix}c{fi}]"
                 )
-                filter_parts.append(f"{curr_v}[{tag_prefix}c{fi}]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
+                filter_parts.append(f"{curr_v}[{tag_prefix}c{fi}]blend=all_mode=addition:enable={en}[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
     return curr_v
 
@@ -2364,11 +2369,9 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
     tv = clip.color_grade == "tv" and not clip.src_processed
     fmt = "talking_head_9_16" if clip.src_processed else clip.format
     if clip.format == "cinematic_16_9":
-        out_w, out_h = (1280, 720)
-    elif tv:
-        out_w, out_h = (1080, 1920)
+        out_w, out_h = (1920, 1080)
     else:
-        out_w, out_h = (576, 1024)
+        out_w, out_h = (1080, 1920)
     top_h = int(round(out_h * 0.45 / 2) * 2)
     bot_h = out_h - top_h
 
@@ -2517,33 +2520,48 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
                 filter_parts.append(f"[{src_i}:v]scale={out_w}:{out_h}:flags=lanczos[comp0]")
                 comp = "[comp0]"
         else:
-            # ── upper layer: PiP overlay (static pip box or tracked path) ──
-            pip = L.pip or PipBox()
-            pw = max(0.05, min(0.95, float(pip.w or 0.30)))
-            ov_w = max(24, int(out_w * pw))
-            chain = f"[{src_i}:v]scale={ov_w}:-2:flags=lanczos,format=rgba"
-            if op < 0.99:
-                chain += f",colorchannelmixer=aa={op:g}"
-            o_start = max(0.0, float(L.out_start or 0.0))
-            o_end = min(total_dur, o_start + max(0.2, float(L.duration or total_dur)))
-            if o_start > 0.01:
-                chain += f",setpts=PTS+{o_start:.3f}/TB"
-            filter_parts.append(chain + f"[ovlL{li}]")
-            if L.track_path:
-                points = _downsample_track_path(L.track_path)
-                x_expr = _build_track_expr(points, "x", out_w, out_h)
-                y_expr = _build_track_expr(points, "y", out_w, out_h)
-                x_full = f"max(0,min({x_expr}-w/2,W-w))"
-                y_full = f"max(0,min({y_expr}-h/2,H-h))"
+            # ── upper layer: PiP overlay (if pip/track_path explicitly set) or fullscreen cover overlay ──
+            if L.pip or L.track_path:
+                pip = L.pip or PipBox()
+                pw = max(0.05, min(0.95, float(pip.w or 0.30)))
+                ov_w = max(24, int(out_w * pw))
+                chain = f"[{src_i}:v]scale={ov_w}:-2:flags=lanczos+accurate_rnd,format=rgba"
+                if op < 0.99:
+                    chain += f",colorchannelmixer=aa={op:g}"
+                o_start = max(0.0, float(L.out_start or 0.0))
+                o_end = min(total_dur, o_start + max(0.2, float(L.duration or total_dur)))
+                if o_start > 0.01:
+                    chain += f",setpts=PTS+{o_start:.3f}/TB"
+                filter_parts.append(chain + f"[ovlL{li}]")
+                if L.track_path:
+                    points = _downsample_track_path(L.track_path)
+                    x_expr = _build_track_expr(points, "x", out_w, out_h)
+                    y_expr = _build_track_expr(points, "y", out_w, out_h)
+                    x_full = f"max(0,min({x_expr}-w/2,W-w))"
+                    y_full = f"max(0,min({y_expr}-h/2,H-h))"
+                else:
+                    x_full = f"max(4,min({max(0.0, float(pip.x)) * out_w:.1f},W-w-4))"
+                    y_full = f"max(4,min({max(0.0, float(pip.y)) * out_h:.1f},H-h-4))"
+                en = ""
+                if o_start > 0.01 or o_end < total_dur - 0.01:
+                    en = f":enable='between(t,{o_start:.3f},{o_end:.3f})'"
+                filter_parts.append(f"{comp}[ovlL{li}]overlay=x='{x_full}':y='{y_full}':format=auto{en}[eoL{li}]")
+                comp = f"[eoL{li}]"
             else:
-                # clamp inside the frame — PiP never leaves the canvas
-                x_full = f"max(4,min({max(0.0, float(pip.x)) * out_w:.1f},W-w-4))"
-                y_full = f"max(4,min({max(0.0, float(pip.y)) * out_h:.1f},H-h-4))"
-            en = ""
-            if o_start > 0.01 or o_end < total_dur - 0.01:
-                en = f":enable='between(t,{o_start:.3f},{o_end:.3f})'"
-            filter_parts.append(f"{comp}[ovlL{li}]overlay=x='{x_full}':y='{y_full}':format=auto{en}[eoL{li}]")
-            comp = f"[eoL{li}]"
+                # Fullscreen / cover video overlay (B-roll or camera angle switch, not corner duplicate)
+                chain = f"[{src_i}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={out_w}:{out_h},format=rgba"
+                if op < 0.99:
+                    chain += f",colorchannelmixer=aa={op:g}"
+                o_start = max(0.0, float(L.out_start or 0.0))
+                o_end = min(total_dur, o_start + max(0.2, float(L.duration or total_dur)))
+                if o_start > 0.01:
+                    chain += f",setpts=PTS+{o_start:.3f}/TB"
+                filter_parts.append(chain + f"[ovlL{li}]")
+                en = ""
+                if o_start > 0.01 or o_end < total_dur - 0.01:
+                    en = f":enable='between(t,{o_start:.3f},{o_end:.3f})'"
+                filter_parts.append(f"{comp}[ovlL{li}]overlay=x=0:y=0:format=auto{en}[eoL{li}]")
+                comp = f"[eoL{li}]"
         # this layer's own audio into the mix
         if not L.muted and _source_has_audio(L.source_file):
             gain = max(0.0, min(3.0, float(L.volume if L.volume is not None else 1.0)))
@@ -2732,7 +2750,7 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
 
     if mix_labels:
         filter_parts.append(
-            "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0,apad=whole_dur={total_dur:.3f}[aout]"
+            "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0,apad=whole_dur={total_dur:.3f},loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
         )
         audio_map = "[aout]"
     else:
@@ -2749,9 +2767,21 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
         "-map", comp,
         "-map", audio_map,
         "-t", f"{total_dur:.3f}",
-        "-c:v", "libx264", "-preset", ("veryfast" if tv else "fast"), "-crf", ("19" if tv else "22"),
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "15",
+        "-tune", "film",
+        "-x264-params", "aq-mode=3:aq-strength=0.9:deblock=-1,-1",
+        "-g", "60",
+        "-bf", "3",
         "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
+        "-colorspace", "bt709",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-color_range", "tv",
+        "-c:a", "aac",
+        "-b:a", "256k",
+        "-ar", "48000",
         "-movflags", "+faststart",
         "-map_metadata", "-1",
         "-fflags", "+bitexact",
@@ -2853,14 +2883,11 @@ def export_clip_pack(req: ExportPackRequest):
         out_filename = f"Short_{clean_handle}_{timestamp_str}_{idx+1}.mp4"
         out_path = os.path.join(EXPORTED_PACKS_DIR, out_filename)
 
-        # ── Output resolution: TV templates render full 1080x1920 ──
-        tv = clip.color_grade == "tv"
+        # ── Output resolution: 1080x1920 for vertical, 1920x1080 for 16:9 ──
         if clip.format == "cinematic_16_9":
-            out_w, out_h = (1280, 720)
-        elif tv:
-            out_w, out_h = (1080, 1920)
+            out_w, out_h = (1920, 1080)
         else:
-            out_w, out_h = (576, 1024)
+            out_w, out_h = (1080, 1920)
 
         # Facecam crop window for the top band of split / full-frame crop of talking head
         # (heights forced even: libx264 yuv420p rejects odd dimensions).
@@ -3236,14 +3263,15 @@ def export_clip_pack(req: ExportPackRequest):
                     filter_parts.append(f"[{mtag}raw]anull[{mtag}]")
                 mix_labels.append(f"[{mtag}]")
             filter_parts.append(
-                "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0[aout]"
+                "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
             )
             audio_map = "[aout]"
         elif n_seg > 1:
-            filter_parts.append("".join(audio_seg_labels) + f"concat=n={n_seg}:v=0:a=1[aout]")
+            filter_parts.append("".join(audio_seg_labels) + f"concat=n={n_seg}:v=0:a=1,loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
             audio_map = "[aout]"
         else:
-            audio_map = "0:a?"
+            filter_parts.append("0:a?loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
+            audio_map = "[aout]"
 
         # Construct full FFmpeg command
         filter_complex_str = ";".join(filter_parts)
@@ -3251,9 +3279,21 @@ def export_clip_pack(req: ExportPackRequest):
             "-filter_complex", filter_complex_str,
             "-map", curr_v,
             "-map", audio_map,
-            "-c:v", "libx264", "-preset", ("veryfast" if tv else "fast"), "-crf", ("19" if tv else "22"),
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "15",
+            "-tune", "film",
+            "-x264-params", "aq-mode=3:aq-strength=0.9:deblock=-1,-1",
+            "-g", "60",
+            "-bf", "3",
             "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
+            "-colorspace", "bt709",
+            "-color_primaries", "bt709",
+            "-color_trc", "bt709",
+            "-color_range", "tv",
+            "-c:a", "aac",
+            "-b:a", "256k",
+            "-ar", "48000",
             "-movflags", "+faststart",
             out_path
         ]
@@ -3261,7 +3301,7 @@ def export_clip_pack(req: ExportPackRequest):
         try:
             ffmpeg_env = os.environ.copy()
             if "FONTCONFIG_PATH" not in ffmpeg_env and sys.platform == "win32":
-                ffmpeg_env["FONTCONFIG_PATH"] = r"C:\Windows\Fonts"
+                ffmpeg_env["FONTCONFIG_PATH"] = FONTS_DIR
 
             render_res = subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=600, env=ffmpeg_env)
             if render_res.returncode == 0 and os.path.exists(out_path):
@@ -3339,8 +3379,8 @@ def preview_frame(req: dict):
             fp.append(f"[topL][botL]vstack=inputs=2[comp0]")
             comp = "[comp0]"
         else:
-            bw = f"min(iw\,ih*{W / float(H):.5f})"
-            bh_ = f"min(ih\,iw/{W / float(H):.5f})"
+            bw = f"min(iw\\,ih*{W / float(H):.5f})"
+            bh_ = f"min(ih\\,iw/{W / float(H):.5f})"
             fp.append(f"[0:v]crop={bw}:{bh_},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[comp0]")
             comp = "[comp0]"
 

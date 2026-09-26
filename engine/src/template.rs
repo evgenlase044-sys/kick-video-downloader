@@ -11,7 +11,7 @@ pub struct Canvas {
     pub fps: f64,
 }
 fn d_width() -> u32 { 1080 }
-fn d_height() -> u32 { 1440 }
+fn d_height() -> u32 { 1920 }
 fn d_fps() -> f64 { 60.0 }
 impl Default for Canvas {
     fn default() -> Self { Canvas { width: d_width(), height: d_height(), fps: d_fps() } }

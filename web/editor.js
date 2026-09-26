@@ -1889,9 +1889,10 @@
             setPlaceholderText("Нет клипа под плейхедом", "Промежуток таймлайна пуст — переместите клип или плейхед");
         }
 
-        // Overlay PiP (topmost video layer above the base)
+        // Overlay PiP (only when explicitly configured as PiP or tracked)
+        const isOverPip = !!(over && over.media && (over.isPip || over.pipBox || (over.trackPath && over.trackPath.length)));
         if (overlayVideoEl) {
-            if (over && over.media) {
+            if (isOverPip) {
                 ensureElMedia(overlayVideoEl, over);
                 setElTime(overlayVideoEl, clipTargetTime(over, t));
                 overlayVideoEl.style.opacity = String(over.opacity ?? 1);
@@ -3450,15 +3451,18 @@
         }
     }
 
-    // PiP-окно элемента: дефолт как в превью (правый верх, 30% ширины) —
-    // единая функция и для сборки экспорта, и для композитного превью
+    // PiP-окно элемента: только если элемент явно помечен как PiP или трекинг
     function pipForClip(c) {
+        if (!c) return null;
         if (c.pipBox) return c.pipBox;
         if (c.trackPath && c.trackPath.length) {
             const p = c.trackPath[0];
             return { x: Math.max(0, p.x), y: Math.max(0, p.y), w: Math.max(0.05, p.w) };
         }
-        return { x: 0.688, y: 0.018, w: 0.30 };
+        if (c.isPip) {
+            return { x: 0.688, y: 0.018, w: 0.30 };
+        }
+        return null;
     }
     // ── TV 9:16 composite preview: EXACTLY like the export will look ──
     // Layers bottom→top, PiP windows, FX elements with z-order (an FX under an
@@ -3910,7 +3914,7 @@
         for (let z = layers[0].z; z >= 0; z--) {
             if (z !== layers[0].z) {
                 const up = layerByZ.get(z);
-                if (up) renderPip(up);
+                if (up && pipForClip(up.clip)) renderPip(up);
             }
             if (z > textTopZ) appendFxDivs(stage, t, z, stageW, stageH);
         }
