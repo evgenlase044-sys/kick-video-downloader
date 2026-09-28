@@ -88,7 +88,7 @@
                     mt = { local: mt.local, src: srcAtStart };
                 } else {
                     const local = t - remap.s0;
-                    mt = { local: mt.local, src: srcAtStart + 0.35 * local +
+                    mt = { local: mt.local, src: srcAtStart +
                            integrateRamp(local, remap.e0 - remap.s0) };
                 }
             }
