@@ -82,8 +82,8 @@ class _Server:
         self.httpd.server_close()
 
 
-def _ffmpeg(*args):
-    r = subprocess.run(["ffmpeg", "-v", "error", "-y", *args], capture_output=True, text=True)
+def _ffmpeg(*args, cwd=None):
+    r = subprocess.run(["ffmpeg", "-v", "error", "-y", *args], capture_output=True, text=True, cwd=cwd)
     assert r.returncode == 0, r.stderr
 
 
@@ -235,7 +235,8 @@ class HlsDownloadE2ETest(unittest.TestCase):
 
     def test_fmp4(self):
         _ffmpeg(*_src_args(4), "-hls_segment_type", "fmp4", "-hls_fmp4_init_filename", "init.mp4",
-                "-hls_segment_filename", os.path.join(self.root, "f_%03d.m4s"), os.path.join(self.root, "f.m3u8"))
+                "-hls_segment_filename", os.path.join(self.root, "f_%03d.m4s"), os.path.join(self.root, "f.m3u8"),
+                cwd=self.root)
         self.assertIn("#EXT-X-MAP", open(os.path.join(self.root, "f.m3u8")).read())
         path, segs, size = self._download("f.m3u8")
         self.assertTrue(segs[0].init)
