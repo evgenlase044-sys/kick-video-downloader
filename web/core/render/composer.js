@@ -19,6 +19,9 @@
     const GRADE = (typeof CoreGrade !== "undefined") ? CoreGrade : require("./grade.js");
     const LUTM = (typeof CoreLut3D !== "undefined") ? CoreLut3D : require("../lut3d.js");
     const EF = (typeof CoreEffects !== "undefined") ? CoreEffects : require("./effects.js");
+    // ONE ramp/freeze curve for preview, composer and ffmpeg export
+    // (web/core/timeRemap.js <-> studio/timeremap.py): duration-preserving.
+    const TR = (typeof CoreTimeRemap !== "undefined") ? CoreTimeRemap : require("../timeRemap.js");
 
     /**
      * renderFrame(comp, f, scale) -> draw list.
@@ -89,7 +92,7 @@
                 } else {
                     const local = t - remap.s0;
                     mt = { local: mt.local, src: srcAtStart +
-                           integrateRamp(local, remap.e0 - remap.s0) };
+                           TR.rampSrcOffset(local, remap.e0 - remap.s0) };
                 }
             }
             const asset = assets[layer.asset];
@@ -198,13 +201,12 @@
         return { k1: (layer.amp != null ? layer.amp : 0.18) * bell,
                  ca: (layer.peak != null ? layer.peak : 3) * bell };
     }
-        /** §15 speed ramp integral: 0.35x (in) -> 1.8x (mid) -> 1x (out). */
+    /** Legacy (pre-audit) ramp integral kept for reference/tests only:
+     * NOT duration-preserving (source time jumped at the window end). */
     function integrateRamp(local, dur) {
         const half = Math.max(1e-3, dur / 2);
         let acc = 0.35 * Math.min(local, half);
         if (local > half) acc += (0.35 + 1.8) / 2 * Math.min(local - half, half);
-        if (local > dur) acc += (1.8 + 1.0) / 2 * Math.min(local - dur, dur);
-        if (local > dur * 1.5) acc += 1.0 * (local - dur * 1.5);
         return acc;
     }
     function aW_(asset) { return asset.w || 1; }
@@ -340,6 +342,7 @@
         pixelAt: pixelAt,
         ssimPairs: ssimPairs,
         scaleParity: scaleParity,
-        flashEnvelope: flashEnvelope
+        flashEnvelope: flashEnvelope,
+        integrateRamp: integrateRamp
     };
 });

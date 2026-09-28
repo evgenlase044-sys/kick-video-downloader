@@ -5,13 +5,37 @@
  * Master clock when playing = audio clock (§16.3); videos follow with rate
  * 0.97/1.03 and seek beyond 150 ms. On pause/scrub: requestVideoFrameCallback
  * + draw by mediaTime. Text is drawn by web/core/text/canvasText.js — no CSS
- * animations. Grade = WebGL2 pass with the own 65^3 LUT (§14.6). Browser-only. */
+ * animations. Grade = WebGL2 pass with the own 65^3 LUT (§14.6). Browser-only.
+ *
+ * Audit fixes: zoom punch (anchored on the tracked face when available),
+ * lens punch, threshold hit, whip, freeze and speed ramp are now VISIBLE in
+ * the preview (same curves as the export: CoreEffects / CoreTimeRemap);
+ * exact VideoFrames are always closed (GPU leak); the grade texture is
+ * reused instead of allocated per frame; webglcontextlost/restored handled. */
 (function (root) {
     "use strict";
     const TM = root.CoreTimeMap;
     const GEO = root.CoreGeometry;
     const LUT = root.CoreLut3D;
     const TXT = root.CoreCanvasText;
+    const TR = root.CoreTimeRemap || null;
+    const EF = root.CoreEffects || null;
+
+    function smoothstep(x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }
+    function fxIn(f) { return f.in != null ? f.in : f.start; }
+    function fxOut(f) { return f.out != null ? f.out : f.end; }
+
+    /** Zoom punch scale at t (export curve when CoreEffects is loaded). */
+    function zoomScale(f, t) {
+        const at = fxIn(f), A = f.amp != null ? f.amp : 0.15;
+        if (EF && EF.zoomPunch) return EF.zoomPunch(t, { A: A, overshoot: 0.12, settleMs: 220, at: at }).scale;
+        const x = t - at;
+        if (x < 0) return 1;
+        const dur = Math.max(0.05, (fxOut(f) - at));
+        const rise = smoothstep(x / 0.09);
+        const back = x > dur ? smoothstep((x - dur) / 0.12) : 0;
+        return 1 + A * 1.12 * rise * (1 - back);
+    }
 
     function CanvasMonitor(canvas, hooks) {
         this.canvas = canvas;                 // visible monitor canvas (1080x1920 buffer)
@@ -23,14 +47,29 @@
         this.work = document.createElement("canvas");
         this.work.width = 1080; this.work.height = 1920;
         this.wctx = this.work.getContext("2d");
+        this.fxCanvas = document.createElement("canvas");
+        this.fxCanvas.width = 1080; this.fxCanvas.height = 1920;
+        this.fctx = this.fxCanvas.getContext("2d");
         this.gradeCanvas = document.createElement("canvas");
         this.gradeCanvas.width = 1080; this.gradeCanvas.height = 1920;
         this.gl = null;
         this.lut = null;
+        this._lutUrl = null;
+        this._srcTex = null;
         this._seekPending = new Set();
         this._stylesLoaded = false;
         this._exact = null;            // {name, t, frame|video} decoded frame (§16 P1)
         this._exactPending = false;
+        const self = this;
+        this.gradeCanvas.addEventListener("webglcontextlost", function (e) {
+            e.preventDefault();
+            self.gl = null; self._srcTex = null;
+            console.warn("[canvasMonitor] WebGL context lost: 2D fallback until restored");
+        });
+        this.gradeCanvas.addEventListener("webglcontextrestored", function () {
+            self._initGl();
+            if (self._lutUrl) self.loadLut(self._lutUrl).catch(() => {});
+        });
         this._initGl();
         this._loadStyles();
     }
@@ -77,7 +116,18 @@
             gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
             this._uN = gl.getUniformLocation(prog, "uN");
             this._uOn = gl.getUniformLocation(prog, "uOn");
+            this._uSrc = gl.getUniformLocation(prog, "uSrc");
+            this._uLut = gl.getUniformLocation(prog, "uLut");
             this._prog = prog;
+            // one reusable source texture (was: a new texture every frame)
+            const tex = gl.createTexture();
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            this._srcTex = tex;
             this.gl = gl;
         } catch (e) {
             console.warn("[canvasMonitor] WebGL2 grade unavailable, fallback to 2D:", e);
@@ -87,10 +137,11 @@
 
     CanvasMonitor.prototype.loadLut = function (url) {
         const self = this;
+        this._lutUrl = url;
         return fetch(url).then(r => r.text()).then(text => {
             const lut = LUT.parseCube(text);
             self.lut = lut;
-            const gl = this.gl;
+            const gl = self.gl;
             if (!gl) return lut;
             const tex = gl.createTexture();
             gl.activeTexture(gl.TEXTURE1);
@@ -118,8 +169,6 @@
         const name = clip.media.filename;
         let el = this.videoPool.get(name);
         if (!el) {
-            // reuse an existing DOM preview element for the same file instead
-            // of decoding it twice
             const existing = [document.getElementById("studioVideoPlayer"),
                               document.getElementById("studioOverlayPlayer")]
                 .find(v => v && (v.getAttribute("data-file") || "") === name);
@@ -133,6 +182,7 @@
             el.muted = true;                     // audio lives on the track audio els
             el.style.display = "none";
             el.setAttribute("data-file", name);
+            el.setAttribute("data-pool", "1");
             document.body.appendChild(el);
             el.src = clip.media.stream_url;
             this.videoPool.set(name, el);
@@ -140,12 +190,22 @@
         return el;
     };
 
+    /** Drop pooled resources of a removed media file (decoder, <video>, frame). */
+    CanvasMonitor.prototype.dropMedia = function (filename) {
+        const el = this.videoPool.get(filename);
+        if (el && el.getAttribute("data-pool") === "1") {
+            try { el.pause(); el.removeAttribute("src"); el.load(); el.remove(); } catch (e) {}
+        }
+        this.videoPool.delete(filename);
+        if (this._exact && this._exact.name === filename) this._closeExact();
+        if (this.hooks.dropDecoder) { try { this.hooks.dropDecoder(filename); } catch (e) {} }
+    };
+
     CanvasMonitor.prototype.enabled = function () {
         const s = this.hooks.settings();
         return !!(s && s.enabled);
     };
 
-    /** Frame stepping on the composition grid (§16.5): ±1/fps. */
     CanvasMonitor.prototype.stepFrames = function (t, n) {
         const s = this.hooks.settings();
         return TM.stepFrames(t, s.fps || 60, n);
@@ -156,21 +216,22 @@
         try { return this.hooks.decoderFor(clip); } catch (e) { return null; }
     };
 
+    CanvasMonitor.prototype._closeExact = function () {
+        const ex = this._exact;
+        if (ex && ex.frame) { try { ex.frame.close(); } catch (e) {} }
+        this._exact = null;
+    };
+
     /**
-     * §16 P1: exact decoded frame for the paused preview. Returns
-     * {frame|video} matching (clip, t) or null — in which case the P0 pool
-     * frame is drawn and an async request is (debounce-)issued; when it
-     * lands, renderAt runs again with the exact frame. Every failure mode
-     * simply keeps the P0 path alive.
+     * §16 P1: exact decoded frame for the paused preview. The frame stays
+     * owned by the monitor until replaced and is ALWAYS closed (it used to
+     * be dropped without close() -> GPU memory leak while scrubbing).
      */
     CanvasMonitor.prototype._takeExactFrame = function (clip, t, s) {
         const ex = this._exact;
         const halfFrame = 0.5 / (s.fps || 60);
-        if (ex && ex.name === clip.media.filename && Math.abs(ex.t - t) < halfFrame) {
-            this._exact = null;
-            return ex;
-        }
-        if (ex && ex.frame) { try { ex.frame.close(); } catch (e) {} this._exact = null; }
+        if (ex && ex.name === clip.media.filename && Math.abs(ex.t - t) < halfFrame) return ex;
+        if (ex) this._closeExact();
         if (!s.playing && !this._exactPending) {
             const dec = this._decoderFor(clip);
             if (dec) {
@@ -181,24 +242,36 @@
                 dec.requestFrame(tReq).then(function (res) {
                     self._exactPending = false;
                     if (res.ok) {
+                        self._closeExact();
                         self._exact = { name: name, t: tReq, frame: res.frame };
                         self.renderAt(self.hooks.now ? self.hooks.now() : tReq);
                     } else if (res.proxy && res.video) {
-                        // scrub jump > 1.5s: the proxy 960x540 GOP-10 frame shows now
+                        self._closeExact();
                         self._exact = { name: name, t: tReq, video: res.video };
                         self.renderAt(self.hooks.now ? self.hooks.now() : tReq);
+                    } else if (res.frame) {
+                        try { res.frame.close(); } catch (e) {}
                     }
-                    // res.ok === false -> silent P0 fallback
-                });
+                }).catch(function () { self._exactPending = false; });
             }
+        } else if (s.playing) {
+            this._closeExact();
         }
         return null;
+    };
+
+    /** Timeline time -> time used for source lookup (freeze/ramp, same curve as export). */
+    CanvasMonitor.prototype._remap = function (t, fx) {
+        if (!TR || !fx || !fx.length) return t;
+        return TR.remapTime(t, fx);
     };
 
     // ── render ───────────────────────────────────────────────────────────
     CanvasMonitor.prototype.renderAt = function (t) {
         const s = this.hooks.settings();
         if (!s.enabled) return false;
+        const fx = this.hooks.fxAt ? (this.hooks.fxAt(t) || []) : [];
+        const tSrc = this._remap(t, fx);
         const layers = this.hooks.videoClips(t);           // topmost first, unlimited
         const base = layers.length ? layers[layers.length - 1] : null;
         const w = this.wctx;
@@ -207,29 +280,58 @@
         w.fillStyle = "#000";
         w.fillRect(0, 0, outW, outH);
         if (!base || !base.media) {
-            this._blit(s);
+            this._blit(s, null);
             return true;
         }
-        const fx = this.hooks.fxAt ? this.hooks.fxAt(t) : [];
+        // camera fx: shake + whip offsets, zoom/lens scale with anchor
         let shake = { dx: 0, dy: 0 };
+        let scale = 1, anchor = { x: 0.5, y: 0.5 }, blurPx = 0, threshold = false;
         for (const f of fx) {
+            const a0 = fxIn(f), a1 = fxOut(f);
             if (f.kind === "shake") {
-                const a = (f.amp || 12) * (1080 / 608);    // px at 1080 wide
-                const env = Math.max(0, Math.min(1, Math.min(t - f.start, f.end - t) / 0.1));
+                const a = (f.amp || 12) * (1080 / 608);
+                const env = Math.max(0, Math.min(1, Math.min(t - a0, a1 - t) / 0.1));
                 shake.dx += a * Math.sin(2 * Math.PI * (f.freq || 7) * t) * env;
                 shake.dy += a * Math.cos(2 * Math.PI * (f.freq || 7) * 9 / 7 * t) * env;
+            } else if (f.kind === "zoom") {
+                const z = zoomScale(f, t);
+                if (z > scale) scale = z;
+                if (f.anchor) anchor = f.anchor;
+                else if (this.hooks.faceAnchor) {
+                    const fa = this.hooks.faceAnchor(base, t);
+                    if (fa) anchor = fa;
+                }
+            } else if (f.kind === "lens") {
+                const p = Math.max(0, Math.min(1, (t - a0) / Math.max(0.05, a1 - a0)));
+                const bell = p > 0 ? Math.exp(-Math.pow((p - 0.32) / 0.35, 2)) : 0;
+                scale = Math.max(scale, 1 + 0.5 * (f.amp != null ? f.amp : 0.18) * bell);
+            } else if (f.kind === "threshold") {
+                if (t >= a0 && t <= a1) threshold = true;
+            } else if (f.kind === "whip") {
+                const dur = Math.max(0.05, a1 - a0);
+                const p = (t - a0) / dur;
+                if (p >= 0 && p <= 1) {
+                    const dir = f.color === "left" ? -1 : 1;
+                    // same clamp as export (0.25*W): never slides the frame out
+                    const e = p < 0.5 ? smoothstep(p * 2) : 1 - smoothstep((p - 0.5) * 2);
+                    shake.dx += dir * 0.25 * outW * e;
+                    blurPx = Math.max(blurPx, 18 * e);
+                }
             }
         }
         w.save();
+        if (scale !== 1) {
+            const ax = anchor.x * outW, ay = anchor.y * outH;
+            w.translate(ax, ay);
+            w.scale(scale, scale);
+            w.translate(-ax, -ay);
+        }
         w.translate(shake.dx, shake.dy);
 
-        // base layer: split / fullscreen / talking head — same math as export.
-        // §16 P1: when paused, prefer the EXACT WebCodecs-decoded frame
-        // (floor(src*fps+1e-6)); the P0 <video> pool is the fallback.
         let v = this.getVideo(base);
         let srcW = v.videoWidth || 1280, srcH = v.videoHeight || 720;
-        this._syncTime(v, base, t, s);
-        const exact = this._takeExactFrame(base, t, s);
+        this._syncTime(v, base, tSrc, s);
+        const exact = this._takeExactFrame(base, tSrc, s);
         if (exact) {
             v = exact.frame || exact.video;
             srcW = exact.frame ? exact.frame.displayWidth : (exact.video.videoWidth || srcW);
@@ -240,23 +342,21 @@
             cropBox: s.cropBox, bgBox: s.bgBox, topRatio: s.topRatio,
             sourceId: base.media.filename
         });
+        if (blurPx > 0.5) w.filter = "blur(" + blurPx.toFixed(1) + "px)";
         for (const op of ops) {
             const ready = exact ? (exact.frame || exact.video.readyState >= 2) : v.readyState >= 2;
-            if (ready) {
-                w.drawImage(v, op.sx, op.sy, op.sw, op.sh, op.dx, op.dy, op.dw, op.dh);
-            }
+            if (ready) w.drawImage(v, op.sx, op.sy, op.sw, op.sh, op.dx, op.dy, op.dw, op.dh);
         }
-        // upper layers: PiP windows (explicit PiP or tracked) — drawn from the
-        // SAME pooled video elements, so unlimited layers (§16.5)
+        w.filter = "none";
         for (let i = layers.length - 2; i >= 0; i--) {
             const c = layers[i];
             if (!c.media) continue;
             const cv = this.getVideo(c);
             if (cv.readyState < 2) continue;
-            this._syncTime(cv, c, t, s);
+            this._syncTime(cv, c, tSrc, s);
             const isPip = c.isPip || c.pipBox || (c.trackPath && c.trackPath.length);
-            if (!isPip) continue;                          // a fullscreen upper layer covers everything
-            const box = this.hooks.trackBoxFor(c, t);
+            if (!isPip) continue;
+            const box = this.hooks.trackBoxFor(c, tSrc);
             const src = box
                 ? { sx: box.x * (cv.videoWidth || 1), sy: box.y * (cv.videoHeight || 1),
                     sw: box.w * (cv.videoWidth || 1), sh: box.h * (cv.videoHeight || 1) }
@@ -272,14 +372,12 @@
         }
         w.restore();
 
-        // static cinebars (§_export_layered_clip bar_top/bar_bottom)
         if (s.barTop > 0) { w.fillStyle = "#000"; w.fillRect(0, 0, outW, s.barTop); }
         if (s.barBottom > 0) { w.fillStyle = "#000"; w.fillRect(0, outH - s.barBottom, outW, s.barBottom); }
 
-        // flash (§15 envelope, deterministic)
         for (const f of fx) {
             if (f.kind !== "flash") continue;
-            const p = (t - f.start) / Math.max(1e-3, f.end - f.start);
+            const p = (t - fxIn(f)) / Math.max(1e-3, fxOut(f) - fxIn(f));
             if (p < 0 || p > 1) continue;
             const env = p < 0.12 ? p / 0.12 : Math.exp(-(p - 0.12) * 4.2);
             const colors = { white: "255,255,255", red: "255,34,34", green: "57,255,0" };
@@ -288,18 +386,15 @@
             w.fillRect(0, 0, outW, outH);
         }
 
-        this._blit(s);
+        this._blit(s, threshold ? "grayscale(1) contrast(12) brightness(1.05)" : null);
 
-        // subtitles: drawn LAST on the output canvas, ungraded (export parity)
         const cue = this.hooks.cueAt ? this.hooks.cueAt(t) : null;
         if (cue && this._stylesLoaded) {
-            TXT.drawCue(this.ctx, cue, cue.localT != null ? cue.localT : t, outW, outH,
-                cue.styleOverride);
+            TXT.drawCue(this.ctx, cue, cue.localT != null ? cue.localT : t, outW, outH, cue.styleOverride);
         }
         return true;
     };
 
-    /** Master-clock sync (§16.3): rate 0.97/1.03, seek beyond 150 ms. */
     CanvasMonitor.prototype._syncTime = function (video, clip, t, s) {
         const target = this.hooks.targetTime(clip, t);
         if (!isFinite(video.duration) || video.duration <= 0) return;
@@ -319,9 +414,8 @@
                 const onReady = () => {
                     self._seekPending.delete(video);
                     video.removeEventListener("seeked", onReady);
-                    // §16.3: redraw by mediaTime via requestVideoFrameCallback
                     if (video.requestVideoFrameCallback) {
-                        video.requestVideoFrameCallback(() => self.renderAt(this.hooks.now ? this.hooks.now() : t));
+                        video.requestVideoFrameCallback(() => self.renderAt(self.hooks.now ? self.hooks.now() : t));
                     }
                 };
                 video.addEventListener("seeked", onReady);
@@ -332,40 +426,44 @@
         }
     };
 
-    /** Work canvas → WebGL2 grade (own LUT) → visible canvas. */
-    CanvasMonitor.prototype._blit = function (s) {
+    /** Work canvas → (threshold) → WebGL2 grade (own LUT) → visible canvas. */
+    CanvasMonitor.prototype._blit = function (s, filter) {
         const out = this.ctx;
-        if (this.gl && this.lut && s.gradeOn) {
-            const gl = this.gl;
+        let src = this.work;
+        if (filter) {
+            this.fctx.filter = filter;
+            this.fctx.drawImage(this.work, 0, 0);
+            this.fctx.filter = "none";
+            src = this.fxCanvas;
+        }
+        const gl = this.gl;
+        if (gl && this.lut && s.gradeOn && !gl.isContextLost()) {
             gl.viewport(0, 0, this.gradeCanvas.width, this.gradeCanvas.height);
             gl.useProgram(this._prog);
-            const tex = gl.createTexture();
             gl.activeTexture(gl.TEXTURE0);
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.work);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.uniform1i(gl.getUniformLocation(this._prog, "uSrc"), 0);
-            gl.uniform1i(gl.getUniformLocation(this._prog, "uLut"), 1);
+            gl.bindTexture(gl.TEXTURE_2D, this._srcTex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+            gl.uniform1i(this._uSrc, 0);
+            gl.uniform1i(this._uLut, 1);
             gl.uniform1f(this._uOn, 1.0);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
-            gl.deleteTexture(tex);
             out.drawImage(this.gradeCanvas, 0, 0);
         } else {
-            out.drawImage(this.work, 0, 0);
+            out.drawImage(src, 0, 0);
         }
     };
 
     CanvasMonitor.prototype.dispose = function () {
+        this._closeExact();
         for (const el of this.videoPool.values()) {
-            if (el && el.dataset && !el.id) {           // only remove pool-created elements
+            if (el && el.getAttribute && el.getAttribute("data-pool") === "1") {
                 try { el.pause(); el.remove(); } catch (e) {}
             }
         }
         this.videoPool.clear();
+        if (this.gl && this._srcTex) { try { this.gl.deleteTexture(this._srcTex); } catch (e) {} }
     };
 
+    CanvasMonitor.zoomScale = zoomScale;
     root.CoreCanvasMonitor = CanvasMonitor;
 })(typeof self !== "undefined" ? self : this);

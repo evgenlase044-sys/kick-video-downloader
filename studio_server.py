@@ -4,6 +4,7 @@
 Loads server.py with the audit fixes, installs the security layer, binds to
 127.0.0.1 only with a per-launch token (written to .studio/token, printed as
 a ready URL; the page keeps it in an HttpOnly SameSite=Strict cookie).
+Also mounts the moment finder and templates API (/api/studio/*).
 """
 import argparse
 import ipaddress
@@ -40,10 +41,16 @@ def main(argv=None):
 
     from studio import loader
     server = loader.load_server()
+    failed = [r for r in getattr(server, "_STUDIO_PATCH_REPORT", [])
+              if r.get("status") == "failed" and r.get("required", True)]
+    if failed:
+        print("[studio] WARNING: required server.py fixes failed to apply: " +
+              ", ".join(r["id"] for r in failed), flush=True)
     from studio.app import install
     hosts = ["127.0.0.1", "localhost", "::1"] + ([a.host] if a.allow_remote else [])
     info = install(server.app, token=token, port=a.port, web_dir=server.WEB_DIR, sfx_dir=server.SFX_DIR,
-                   allowed_hosts=hosts, server_report=getattr(server, "_STUDIO_PATCH_REPORT", []))
+                   allowed_hosts=hosts, server_report=getattr(server, "_STUDIO_PATCH_REPORT", []),
+                   downloads_dir=getattr(server, "DOWNLOADS_DIR", os.path.join(BASE_DIR, "downloads")))
     url = f"http://127.0.0.1:{a.port}/index.html?token={token}"
     print(f"[studio] UI: {url}", flush=True)
     if not info.get("riser"):

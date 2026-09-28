@@ -1,0 +1,33 @@
+# Move to .github/workflows/fold-patches.yml, then push any commit to branch `studio-fold`.
+name: Fold studio patches into sources
+on:
+  push:
+    branches: [studio-fold]
+permissions:
+  contents: write
+jobs:
+  fold:
+    if: "!contains(github.event.head_commit.message, '[fold-bot]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: pip install -r requirements.txt
+      - name: Fold patches
+        run: STUDIO_STRICT_PATCHES=1 python -m studio.patching --write | tee fold.log
+      - name: Checks
+        run: |
+          mkdir -p docs
+          { echo '## Fold log'; echo '```'; cat fold.log; echo '```'; echo; bash tools/ci_check.sh; } > docs/CI_REPORT.md || true
+          rm -f fold.log
+      - name: Commit
+        run: |
+          git config user.name "studio-fold-bot"
+          git config user.email "studio-fold-bot@users.noreply.github.com"
+          git add -A server.py web/editor.js web/index.html docs/CI_REPORT.md
+          git diff --cached --quiet || git commit -m "chore: fold anchored audit fixes into sources + CI report [fold-bot]"
+          git push

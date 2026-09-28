@@ -40,4 +40,15 @@ INDEX_PATCHES = [
           old=r"(?=<script[^>]*src=[\"'][^\"']*core/canvasMonitor\.js)",
           new="<script src=\"core/timeRemap.js\"></script><!-- studio:timeremap-script -->\n    ",
           marker="studio:timeremap-script"),
+    # preview fx use the SAME zoom curve as the export (CoreEffects)
+    Patch(id="effects-script", required=False, regex=True, count=1,
+          guard=lambda src: "core/render/effects.js" not in src,
+          old=r"(?=<script[^>]*src=[\"'][^\"']*core/canvasMonitor\.js)",
+          new="<script src=\"core/render/effects.js\"></script><!-- studio:effects-script -->\n    ",
+          marker="studio:effects-script"),
+    # §6 moment finder + §7 templates panel
+    Patch(id="moments-panel", required=False, regex=True, count=1,
+          old=r"(?=</body>)",
+          new="<script src=\"studio/moments.js\"></script><!-- studio:moments-panel -->\n",
+          marker="studio:moments-panel"),
 ]

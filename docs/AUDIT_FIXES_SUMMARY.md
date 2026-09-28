@@ -1,205 +1,54 @@
-# Kick Video Downloader: Audit Fixes Summary
+# Audit fixes: что реально сделано (сверено с кодом)
 
-**Total PRs Merged:** 3 (Step 1 main fixes + Step 2 Part A-B)  
-**Total Commits:** ~25 (squashed into PRs)  
-**Date Range:** 2026-09-28
+Аудит: коммит `d91ca83`. Исправления: PR #1–#5. Эта версия заменяет прошлую сводку, где часть пунктов
+была заявлена, но в коде не существовала (например `/api/moments`, «шаблоны готовы»).
 
-## What Was Fixed
+## Как применяются фиксы в `server.py` / `web/editor.js` / `web/index.html`
+Файлы огромные (217 / 305 / 103 КБ), поэтому фиксы для них — **якорные патчи**
+(`studio/server_patches.py`, `studio/web_patches.py`, движок `studio/patching.py`).
 
-### ✅ Step 1: "Разблокировать" (Unblock Critical Bugs)
+**Важно:** сейчас патчи применяются при запуске через `studio_server.py` (так запускают `main.js` и `start_web.bat`).
+`python server.py` напрямую = старый код с багами. Чтобы вшить навсегда: `python -m studio.patching --write`
+(локально, одна команда) или workflow из `tools/github-workflows/fold-patches.yml`.
+Тест `PatchAnchorsTest` падает, если хоть один обязательный патч перестал находить свой якорь.
 
-#### 1. Core Rendering Issues
-- **composer.js**: Removed double 0.35× multiplier in speed ramp (fixes jerky freeze/ramp playback)
-- **canvasText.js**: Increased max lines from 2 to 3 (prevents word loss on Russian phrases)
-- **web/core/yuv.js**: Fixed chroma averaging (proper 2×2 box filter, not running average)
-- **web/core/demux.js**: Fixed sync sample detection for keyframe identification
-- **web/core/timeRemap.js**: Shared ramp/freeze curve (UMD-compatible)
-- **web/core/decoderWorker.js**: Fixed frame index calculation (uses source FPS, not preview FPS)
+## §1 Баги
+| Баг | Статус | Где |
+|---|---|---|
+| `**snap` → NameError в `/api/progress` | ✅ | патч `progress-nameerror` |
+| TDZ `exportPackBtn` | ✅ | патч `tdz-*` |
+| Недостижимый браузерный экспортёр | ✅ заморожен, не грузится | патч `drop-dead-exporter` |
+| Демуксер: всё keyframe | ✅ | `web/core/mp4/demux.js` |
+| Скачивание без cookies | ✅ сервер (`cookies-*`) + CLI (PR #5) | |
+| YUV хрома не 2×2 | ✅ + тест | `yuv.js`, `selftest_audit.js` |
+| Ramp 0.35× дважды | ✅ одна кривая для превью, композера и ffmpeg | `timeRemap.js` ↔ `studio/timeremap.py` |
+| SFX `riser` | ✅ генерится при старте; `whoosh_magic`/`hit_small` подключены | `studio/sfx.py` |
+| CLI KeyError | ✅ поле возвращает `DiskManager` | `disk_manager.py` |
+| **Новый баг из PR #1:** патч `disk-peak` передавал `peak_factor` в `check_space()`, который его не принимал → TypeError на КАЖДОМ скачивании | ✅ PR #5 | `disk_manager.py` |
+| **Регресс PR #2:** композер считал ramp своей кривой со скачком времени в конце окна, превью ≠ экспорт | ✅ PR #5 | `composer.js` |
+| **Регресс PR #2:** «3 строки» противоречили правилу ≤2 строк и всё равно теряли слова на 4-й | ✅ PR #5 | `canvasText.js` |
 
-#### 2. Server-Side Fixes (via patching engine)
-- **Progress stream**: Fixed NameError (`**snap` → `**data`)
-- **Export button**: Fixed temporal dead zone (TDZ) in editor.js
-- **Download cookies**: Added to both probe and segment download (fixes 403 from Cloudflare)
-- **WS render**: Rewritten stderr handling (uses temp file, no deadlock), added `-shortest`/`apad`, exact FPS
-- **SSRF protection**: Playlist URL allowlisting for `/api/proxy`
-- **Disk peak**: Added accounting for simultaneous segments + final MP4
-- **Disk collision**: Fixed temp file naming (milliseconds → random per-launch)
+## Рендер, экспорт, превью
+* ✅ WS-рендер: stderr в файл, `-t` = длина видео, рациональный FPS, цветовые теги до `-i`, лимиты заголовка, аудио только из `downloads/`/`exported_packs/`, NVENC при наличии.
+* ✅ Ramp/freeze попадают в файл (setpts/select), whip клампится.
+* ✅ Точный FPS (`fps_exact`, `fps_rational`), короткие слова не выкидываются, temp-файлы ASR с uuid.
+* ✅ PR #5 превью: zoom (якорь на лицо через хук `faceAnchor`), lens punch, threshold, whip, freeze, ramp видны.
+* ✅ PR #5: `VideoFrame` всегда закрывается, текстура грейда одна, `webglcontextlost/restored`, `dropMedia()`.
+* ✅ PR #5 текст: ≤2 строки, автоуменьшение до 72%, дальше страницы (ни одно слово не теряется), караоке активного слова, сила pop по важности, rise/spin/wave/tremble/shimmer/char_type, экструзия/tilt/bob, алиас `mrbeast → mrbeast_3d`, безопасная зона 40–1040 × 150–1650.
 
-#### 3. Download & CLI
-- **cli.py**: Added 5% buffer calculation for disk space warning (was KeyError)
-- **downloader.py**: Proper merge via ffmpeg concat with BT.709 color tags
+## Скачивание (PR #5)
+* ✅ HLS-парсер: EXT-X-MAP/KEY/BYTERANGE/DISCONTINUITY, URI без `#EXTINF` не сегмент, понятные отказы.
+* ✅ Resume между запусками (`downloads/_resume_<key>/`), атомарный `.part.mp4`, проверка Content-Length.
+* ✅ Диск: пик (сегменты + MP4) + 5% минус уже скачанное.
+* ✅ Склейка `+genpts`/`make_zero` (разрывы HLS).
+* ✅ CLI: cookies, `--start/--end` с точной обрезкой, `-q`, `-y`.
 
-#### 4. Dead Code Cleanup
-- **Disabled exporter.js path** (browser export not implemented)
-- **Removed Rust engine calls** (engine/ is frozen, never invoked)
-- **Marked old ASS generator** as legacy
+## Безопасность
+* ✅ `studio_server.py`: 127.0.0.1, токен (HttpOnly cookie/заголовок), Host/Origin, пути только в `downloads/`, импорт только медиа, allowlist Kick/CDN (SSRF), лимиты WS.
 
-### ✅ Step 2: Text Rendering Improvements (Part A-B)
+## Новое (PR #5)
+* ✅ Автопоиск моментов: `studio/moments.py`, `POST /api/studio/moments` (аудио-всплески, чат, речь, опц. LLM Groq с хук-текстом), панель «🔥 Моменты».
+* ✅ Шаблоны Хайп/История/Чистый + политика эффектов с кулдаунами: `studio/templates.py`, `GET /api/studio/templates`, `POST /api/studio/templates/plan`.
+* ✅ Реальные тесты: `studio/tests/test_audit.py`, `web/core/selftest_audit.js`, `tools/ci_check.sh`.
 
-#### Text & Export Parity
-- Speed ramp calculation corrected (§15 spec compliance)
-- Text layout supports 3-line Russian phrases
-- CLI disk warnings now calculate 5% safety buffer
-
----
-
-## What Remains
-
-### 🔶 Step 2 Part C: Preview Effect Visibility
-**Not yet done** — requires applying zoom/whip/lens/freeze to canvas preview
-- Zoom punch not visible in 9:16 monitor preview
-- Whip offset not shown
-- Lens distortion not applied
-- Would require: new `canvasEffects.js` module + integration into `canvasMonitor.js`
-
-### 🔶 Step 2 Part D: Unified Canvas→FFmpeg Path
-**Architecture redesign** — true WYSIWYG text rendering  
-- Text currently renders in preview + export differently
-- Solution: Canvas layer → PNG sequence → ffmpeg overlay
-- Effort: 5–7 days estimated
-- **Code infrastructure exists** (studio/render_ws.py partial implementation)
-
-### 🔶 Step 3: Template System (Hype / Story / Clean)
-**Mostly coded, not activated**
-- `/api/templates` endpoint exists
-- `/api/templates/policy` returns effect policy
-- **Missing**: Web UI dropdown, hotkey validation against policy, composition storage
-- **Effort**: 1–2 days (mostly UI/integration)
-
-### 🔶 Step 4: Auto-Moment Finding
-**Fully coded, not activated**
-- Audio envelope detection (spikes)
-- Chat signal ranking
-- Transcript keywords → LLM re-ranking
-- `/api/moments` endpoint returns top-10
-- **Missing**: UI integration, moment selection list, auto-fetch VOD segments
-- **Effort**: 2–3 days (mostly UI/UX)
-
-### 🔴 Lower Priority Issues Still Open
-
-#### HLS Parser (size_calculator.py)
-- Only supports avc1, no HEVC/fMP4/MPEG-TS
-- No byte-range, EXT-X-MAP, discontinuity support
-- Length calc from first stts sample (breaks on VFR)
-- **Impact**: Low (works for most Kick streams)
-
-#### Preview GPU Issues
-- VideoFrame memory leak on scrub (close() not called)
-- WebGL context loss not handled (black screen)
-- No RVFC (RequestVideoFrameCallback) fallback
-- **Impact**: Medium (affects responsive scrubbing)
-
-#### Export Quality
-- 8-bit grading (banding on dark streams, needs 10-bit or dither)
-- No hardware encode fallback (only `libx264 slow crf16`)
-- `-ss` placement not optimized (may decode whole file instead of seek)
-- Two loudnorm paths (layered vs legacy) → inconsistent loudness
-- **Impact**: Medium (affects YouTube/TikTok quality)
-
-#### Download Robustness
-- No resume across launches (temp folder recreated)
-- Segment retry logic good, but no exponential backoff
-- No parallel segment speed reporting
-- **Impact**: Low (UX polish)
-
----
-
-## Architecture & Code Quality
-
-### What Was Improved
-✓ Patching engine (studio/patching.py) handles large file edits safely  
-✓ Server-side hooks (studio/server_hooks.py) separate concerns  
-✓ Security layer (studio/security.py) enforces loopback + token-based auth  
-✓ Moment finder & templates are fully deterministic, testable  
-✓ WS render rewrite eliminates deadlock  
-
-### What Still Needs Work
-- Canvas rendering doesn't fully match export (effects visibility)
-- No unified LUT/grade pipeline (three renderers)
-- Text rendering duplicated (canvas + ASS)
-- Verification suite is synthetic (no real VOD tests)
-
----
-
-## Recommended Next Steps
-
-### Phase 1: Quick Wins (3–5 days)
-1. **Activate templates UI** (Step 3 integration, 1–2 days)
-   - Add dropdown to editor for Hype/Story/Clean
-   - Validate hotkeys against template policy
-   
-2. **Activate moment finder** (Step 4 integration, 2–3 days)
-   - Show top-10 moments on timeline
-   - Add "fetch segment" button
-   
-3. **Preview effect visibility** (Step 2 Part C, 2 days)
-   - Integrate canvasEffects.js
-   - Show zoom/whip/lens in monitor
-
-### Phase 2: Unified Rendering (5–7 days)
-- Canvas→PNG layer path (Step 2 Part D)
-- Proper WYSIWYG text (major quality bump)
-
-### Phase 3: Polish (Ongoing)
-- GPU leak fixes
-- Export quality improvements
-- HLS parser enhancements
-
----
-
-## Testing Notes
-
-All fixes have been verified with:
-- Unit tests for ramp curve, moments scoring, template policies
-- Integration tests for WS render (ffmpeg command building)
-- Parity checks between composer.js (export) and canvas (preview)
-
-**No real VOD export tests yet** (verification suite uses synthetic video only).  
-**Recommend**: Test with actual Kick stream before production use.
-
----
-
-## Files Changed
-
-**Core Rendering (Web)**
-- web/core/render/composer.js
-- web/core/text/canvasText.js
-- web/core/render/canvasMonitor.js (partial, effects still TODO)
-- web/core/yuv.js
-- web/core/mp4/demux.js
-- web/core/mp4/decoderWorker.js
-- web/core/timeRemap.js
-
-**Server (Python)**
-- studio/patching.py
-- studio/server_patches.py
-- studio/web_patches.py
-- studio/loader.py
-- studio/server_hooks.py
-- studio/security.py
-- studio/render_ws.py
-- studio/templates.py (ready)
-- studio/moments.py (ready)
-- studio/app.py (ready)
-- studio_server.py (entry point)
-- cli.py
-- main.js
-
-**Total: 20 files modified/created, ~3000 lines of code**
-
----
-
-## Build & Run
-
-```bash
-python studio_server.py
-# Output: listening on http://127.0.0.1:8000 with token
-# Open URL in browser
-```
-
-Token changes per launch (security against hijacking).
-
----
-
-**Status**: Ready for manual testing on real streams.  
-**Next Blocker**: UI integration for templates/moments (Step 3-4).
+Что осталось: `docs/REMAINING_FIXES.md`.
