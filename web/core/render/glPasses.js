@@ -1,8 +1,8 @@
 /* Kick Clip Studio — web/core/render/glPasses.js
  * PLAN §12.4/§13/§20: GPU (WebGL2) versions of the render cores.
  * The shaders mirror the pure JS kernels (effects.js / lens.js) formula-by-
- * formula; the GPU<->JS equivalence gate in verify_all.py runs both on the
- * same deterministic inputs inside headless Electron and compares.
+ * formula; tools/gl_equiv_test.js runs both on the same deterministic inputs
+ * inside headless Electron (web/core/render/gltest.html) and compares.
  * Browser-only (needs WebGL2 + EXT_color_buffer_float). */
 (function (root) {
     "use strict";
@@ -282,7 +282,10 @@
         return mono;
     };
 
-    // ── Lens & Detail §13.1 (lens + CA + wave) ───────────────────────────
+    // ── Lens & Detail §13.1 (wave -> lens -> radial CA) ──────────────────
+    // Mirrors lens.js mapPoint(): wave and barrel act on the output uv; the CA
+    // radius is measured on the UNdistorted output uv (caOffsets(u, v)) and
+    // scales only the horizontal offset from the lens center (cx_()).
     const FS_LENS = [
         "#version 300 es",
         "precision highp float;",
@@ -296,19 +299,15 @@
         "  return vec2(uCx, uCy) + (uv - vec2(uCx, uCy)) * ((1.0 + uK1*r2 + uK2*r2*r2) / uNorm);",
         "}",
         "void main(){",
+        "  vec2 c = vec2(uCx, uCy);",
         "  vec2 uv = vUv;",
         "  uv.x += uWaveA * sin(6.28318530718 * (uv.y * uWaveF + uT * uWaveV));",
         "  uv = lensMap(uv);",
-        "  vec2 c = vec2(uCx, uCy);",
-        "  vec2 dl = (uv - c) * vec2(uAspect, 1.0);",
-        "  float r = length(dl);",
+        "  float r = length((vUv - c) * vec2(uAspect, 1.0));",
         "  float k = uCA * r;",
-        "  vec2 offR = (uv - c) * (1.0 + k);",
-        "  vec2 offB = (uv - c) * (1.0 - k);",
-        "  float rr = texture(uSrc, offR).r;",
-        "  float gg = texture(uSrc, uv).g;",
-        "  float bb = texture(uSrc, offB).b;",
-        "  o = vec4(uWaveA * 1000.0, uK1, uCx, uCy);",   // DEBUG
+        "  vec2 uvR = vec2(uCx + (uv.x - uCx) * (1.0 + k), uv.y);",
+        "  vec2 uvB = vec2(uCx + (uv.x - uCx) * (1.0 - k), uv.y);",
+        "  o = vec4(texture(uSrc, uvR).r, texture(uSrc, uv).g, texture(uSrc, uvB).b, 1.0);",
         "}"
     ].join("\n");
 

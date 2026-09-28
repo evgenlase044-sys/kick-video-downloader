@@ -29,11 +29,6 @@
         const gpuAlpha = new GLP.StrokePass(W1, H1).run(mask, radius);
         let jfaDiff = 0;
         for (let i = 0; i < W1 * H1; i++) jfaDiff = Math.max(jfaDiff, Math.abs(jsAlpha[i] - gpuAlpha[i]));
-        let fs0 = -1;
-        for (let i = 0; i < W1 * H1; i++) if (mask[i]) { fs0 = i; break; }
-        console.error('[dbg] jfa seed', fs0 % W1, Math.floor(fs0 / W1),
-            'js@seed', jsAlpha[fs0].toFixed(3), 'gpu@seed', gpuAlpha[fs0].toFixed(3),
-            'js@n', jsAlpha[fs0 + 1].toFixed(3), 'gpu@n', gpuAlpha[fs0 + 1].toFixed(3));
         out.jfa = jfaDiff;
 
         // ── 2) dual-Kawase: 32x32 impulse ────────────────────────────────
@@ -54,18 +49,21 @@
             img[i + 1] = Math.round(255 * y / (H3 - 1));
             img[i + 2] = 128; img[i + 3] = 255;
         }
-        // bilinear sampler matching OpenGL LINEAR filtering (texel = u*W-0.5)
+        // true bilinear sampler matching OpenGL LINEAR + CLAMP_TO_EDGE (texel = u*W-0.5)
         function sampleBilinear(u, v) {
-            const fx = Math.max(0, Math.min(W3 - 1 - 1e-6, u * W3 - 0.5));
-            const fy = Math.max(0, Math.min(H3 - 1 - 1e-6, v * H3 - 0.5));
+            const fx = Math.max(0, Math.min(W3 - 1, u * W3 - 0.5));
+            const fy = Math.max(0, Math.min(H3 - 1, v * H3 - 0.5));
             const x0 = Math.floor(fx), y0 = Math.floor(fy);
             const x1 = Math.min(W3 - 1, x0 + 1), y1 = Math.min(H3 - 1, y0 + 1);
             const wx = fx - x0, wy = fy - y0;
             const c = (xx, yy, ch) => img[(yy * W3 + xx) * 4 + ch];
-            const r = c(x0, y0, 0) * (1 - wx) + c(x1, y0, 0) * wx;
-            const g = c(x0, y0, 1) * (1 - wx) + c(x1, y0, 1) * wx;
-            const b = c(x0, y0, 2) * (1 - wx) + c(x1, y0, 2) * wx;
-            return [r / 255, g / 255, b / 255];
+            const px = [0, 0, 0];
+            for (let ch = 0; ch < 3; ch++) {
+                const top = c(x0, y0, ch) * (1 - wx) + c(x1, y0, ch) * wx;
+                const bot = c(x0, y1, ch) * (1 - wx) + c(x1, y1, ch) * wx;
+                px[ch] = (top * (1 - wy) + bot * wy) / 255;
+            }
+            return px;
         }
         const params = { k1: 0.18, k2: 0.02, ca: 3, cx: 0.5, cy: 0.5, W: 1080, H: 1920,
                          A: 2, f: 6, v: 1.5, t: 0.3 };
@@ -82,13 +80,6 @@
                 Math.abs(r[0] * 255 - gpuImg[gi]) / 255,
                 Math.abs(g[1] * 255 - gpuImg[gi + 1]) / 255,
                 Math.abs(b[2] * 255 - gpuImg[gi + 2]) / 255);
-        }
-        {
-            const u = 32.5 / W3, v = 32.5 / H3;
-            const m = L.mapPoint(u, v, params, params.t);
-            const gi = (32 * W3 + 32) * 4;
-            console.error('[dbg] mapPt r(', m.r.u.toFixed(4), m.r.v.toFixed(4), ') g(', m.g.u.toFixed(4), m.g.v.toFixed(4), ')');
-            console.error('[dbg] gpu rgb =', gpuImg[gi], gpuImg[gi + 1], gpuImg[gi + 2]);
         }
         out.lens = lDiff;
         out.ok = true;
