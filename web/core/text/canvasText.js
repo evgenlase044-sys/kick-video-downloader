@@ -82,7 +82,7 @@
         return st;
     }
 
-    /** Line layout: max 2 rows, greedy fill by measured width (§12.3 seed). */
+    /** Line layout: max 3 rows, greedy fill by measured width (§12.3 seed). */
     function layoutLines(words, measureFn, maxWidth) {
         const lines = [[]];
         let w = 0;
@@ -90,7 +90,7 @@
             const ww = measureFn(word.text);
             const need = (w > 0 ? measureFn(" ") : 0) + ww;
             if (w + need > maxWidth && lines[lines.length - 1].length) {
-                if (lines.length >= 2) break;               // max 2 rows
+                if (lines.length >= 3) break;               // max 3 rows (supports Russian phrases)
                 lines.push([]);
                 w = 0;
             }
