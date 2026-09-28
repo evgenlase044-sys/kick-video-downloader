@@ -1,7 +1,7 @@
 ## Fold log
 ```
 
-server.py: {'already': 27, 'skipped': 1, 'applied': 3}
+server.py: {'already': 30, 'skipped': 1}
   already  hooks-import                 marker present
   already  progress-nameerror           marker present
   already  cookies-range                marker present
@@ -30,12 +30,11 @@ server.py: {'already': 27, 'skipped': 1, 'applied': 3}
   skipped  dead-ass-generator           guard declined
   already  version-mtime                marker present
   already  main-secure                  marker present
-  applied  fx-anchor-fields             1x
-  applied  zoom-anim                    replaced 909 chars
-  applied  lens-anim                    replaced 641 chars
-  -> written server.py
+  already  fx-anchor-fields             marker present
+  already  zoom-anim                    marker present
+  already  lens-anim                    marker present
 
-web/editor.js: {'already': 10, 'applied': 7}
+web/editor.js: {'already': 17}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
@@ -46,14 +45,13 @@ web/editor.js: {'already': 10, 'applied': 7}
   already  fx-add-identity              marker present
   already  fx-unique-id                 marker present
   already  flash-fxpeak                 marker present
-  applied  hoist-collectors-subs        1x
-  applied  hoist-collectors-text        1x
-  applied  hoist-collectors-fx          1x
-  applied  hoist-collectors-define      1x
-  applied  preview-frame-v2             1x
-  applied  face-anchor-norm             1x
-  applied  drop-tidOfFx                 1x
-  -> written web/editor.js
+  already  hoist-collectors-subs        replacement present
+  already  hoist-collectors-text        replacement present
+  already  hoist-collectors-fx          replacement present
+  already  hoist-collectors-define      marker present
+  already  preview-frame-v2             marker present
+  already  face-anchor-norm             marker present
+  already  drop-tidOfFx                 marker present
 
 web/index.html: {'skipped': 2, 'already': 3}
   skipped  drop-dead-exporter           guard declined
@@ -63,7 +61,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T07:54:59Z, 499b485)
+# CI report (2026-09-28T08:03:28Z, 073e733)
 
 ### ✅ python compile
 ```
@@ -156,9 +154,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x557013dcd680] Impossible to open '/tmp/tmpgajk_h3y/ovjob/000000.png'
-[in#1 @ 0x557013dc2dc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmpgajk_h3y/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5634de319680] Impossible to open '/tmp/tmp39kyott_/ovjob/000000.png'
+[in#1 @ 0x5634de30edc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmp39kyott_/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -188,7 +186,7 @@ test_zoom_anchor_moves_the_punch (studio.tests.test_pr8.Pr8ExportFxTest.test_zoo
 test_zoom_really_zooms_only_inside_its_window (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_really_zooms_only_inside_its_window) ... ok
 
 ----------------------------------------------------------------------
-Ran 45 tests in 10.745s
+Ran 45 tests in 10.597s
 
 OK
 ```
