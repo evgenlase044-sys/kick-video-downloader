@@ -119,12 +119,15 @@ class Pr8ExportFxTest(unittest.TestCase):
         self.assertGreater(sum(a != b for a, b in zip(tl[6:24], tr[6:24])), 10)
 
     def test_lens_punch_is_animated(self):
+        from studio.fx_extra import LENS_STEPS, lens_bell, lens_step_params
         parts = []
         self.s._apply_fx_chain(parts, "[0:v]", [self.s.FxOverlay(kind="lens", start=0.2, end=0.8, peak=0.18)],
                                self.W, self.H, 1.0, "t_")
         k1s = sorted({float(m) for m in re.findall(r"lenscorrection=k1=([-0-9.]+)", ";".join(parts))})
         self.assertGreaterEqual(len(k1s), 4)        # stepped, not one static barrel
-        self.assertAlmostEqual(max(k1s), 0.18, delta=0.02)
+        # PR #9: k1 is the lens.js peak mapped to ffmpeg units (corner-normalised radius)
+        peak = 0.18 * max(lens_bell((i + 0.5) / LENS_STEPS) for i in range(LENS_STEPS))
+        self.assertAlmostEqual(max(k1s), lens_step_params(peak, self.W / self.H)[0], delta=0.003)
         self.assertEqual(len(self._hashes([self.s.FxOverlay(kind="lens", start=0.2, end=0.8, peak=0.18)])), 30)
 
     def test_mixed_chain_renders(self):

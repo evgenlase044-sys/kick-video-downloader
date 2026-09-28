@@ -12,6 +12,9 @@ from studio import ffmpeg_caps
 from studio.render_ws import ws_render  # noqa: F401
 from studio.security import check_import_path as _check_import_path, is_allowed_media_host, remember_playlist_urls
 from studio.timeremap import RAMP_IN_SPEED, ramp_breakpoints
+# PR #9 export FX (lens v2, motion blur, per-band grade)
+from studio.fx_extra import (grade_bands, lens_punch_parts, motion_blur_parts,  # noqa: F401
+                             split_top_h, zoom_blur_window)
 
 DOWNLOAD_PEAK_FACTOR = 2.0   # segments + merged MP4 exist at once
 

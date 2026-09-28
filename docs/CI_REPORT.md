@@ -1,7 +1,7 @@
 ## Fold log
 ```
 
-server.py: {'already': 30, 'skipped': 1}
+server.py: {'already': 30, 'skipped': 1, 'applied': 6}
   already  hooks-import                 marker present
   already  progress-nameerror           marker present
   already  cookies-range                marker present
@@ -33,6 +33,13 @@ server.py: {'already': 30, 'skipped': 1}
   already  fx-anchor-fields             marker present
   already  zoom-anim                    marker present
   already  lens-anim                    marker present
+  applied  zoom-mblur                   1x
+  applied  lens-v2                      replaced 1205 chars
+  applied  whip-mblur                   1x
+  applied  grade-bands-layered          1x
+  applied  grade-bands-pack             1x
+  applied  grade-bands-preview          1x
+  -> written server.py
 
 web/editor.js: {'already': 17}
   already  tdz-declare-early            marker present
@@ -61,7 +68,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T08:23:19Z, 8dd38a3)
+# CI report (2026-09-28T08:47:20Z, 56f444d)
 
 ### ✅ python compile
 ```
@@ -70,11 +77,6 @@ web/index.html: {'skipped': 2, 'already': 3}
 
 ### ✅ anchored patches (server.py / editor.js / index.html)
 ```
-
-server.py: {'already': 30, 'skipped': 1}
-  already  hooks-import                 marker present
-  already  progress-nameerror           marker present
-  already  cookies-range                marker present
   already  cookies-full                 marker present
   already  cookies-download             marker present
   already  ssrf-guard                   marker present
@@ -103,6 +105,12 @@ server.py: {'already': 30, 'skipped': 1}
   already  fx-anchor-fields             marker present
   already  zoom-anim                    marker present
   already  lens-anim                    marker present
+  already  zoom-mblur                   marker present
+  already  lens-v2                      marker present
+  already  whip-mblur                   marker present
+  already  grade-bands-layered          marker present
+  already  grade-bands-pack             marker present
+  already  grade-bands-preview          marker present
 
 web/editor.js: {'already': 17}
   already  tdz-declare-early            marker present
@@ -133,7 +141,6 @@ web/index.html: {'skipped': 2, 'already': 3}
 
 ### ✅ python regression tests
 ```
-test_peak_and_safety (studio.tests.test_audit.DiskManagerTest.test_peak_and_safety) ... ok
 test_server_patch_signature (studio.tests.test_audit.DiskManagerTest.test_server_patch_signature) ... ok
 test_resume_key_stable_across_signed_urls (studio.tests.test_audit.DownloaderTest.test_resume_key_stable_across_signed_urls) ... ok
 test_parse (studio.tests.test_audit.HlsParserTest.test_parse) ... ok
@@ -154,9 +161,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5624a53a8680] Impossible to open '/tmp/tmpbi3vx0c8/ovjob/000000.png'
-[in#1 @ 0x5624a539ddc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmpbi3vx0c8/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x55cda149d680] Impossible to open '/tmp/tmp2mmtizui/ovjob/000000.png'
+[in#1 @ 0x55cda1492dc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmp2mmtizui/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -179,14 +186,19 @@ test_fx_anchor_exported (studio.tests.test_pr8.Pr8EditorTest.test_fx_anchor_expo
 test_patched_editor_parses (studio.tests.test_pr8.Pr8EditorTest.test_patched_editor_parses) ... ok
 test_patches_applied (studio.tests.test_pr8.Pr8EditorTest.test_patches_applied) ... ok
 test_preview_frame_has_no_undefined_token (studio.tests.test_pr8.Pr8EditorTest.test_preview_frame_has_no_undefined_token) ... ok
-[studio] server.py patches: {'already': 30, 'skipped': 1}
+[studio] server.py patches: {'already': 36, 'skipped': 1}
 test_lens_punch_is_animated (studio.tests.test_pr8.Pr8ExportFxTest.test_lens_punch_is_animated) ... ok
 test_mixed_chain_renders (studio.tests.test_pr8.Pr8ExportFxTest.test_mixed_chain_renders) ... ok
 test_zoom_anchor_moves_the_punch (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_anchor_moves_the_punch) ... ok
 test_zoom_really_zooms_only_inside_its_window (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_really_zooms_only_inside_its_window) ... ok
+test_grade_bands_renders (studio.tests.test_pr9.Pr9FxTest.test_grade_bands_renders) ... ok
+test_lens_and_blur_only_touch_their_window (studio.tests.test_pr9.Pr9FxTest.test_lens_and_blur_only_touch_their_window) ... ok
+test_lens_params_match_lens_js (studio.tests.test_pr9.Pr9FxTest.test_lens_params_match_lens_js) ... ok
+test_lens_parts_have_overscan_and_no_rgbashift (studio.tests.test_pr9.Pr9FxTest.test_lens_parts_have_overscan_and_no_rgbashift) ... ok
+test_split_top_h (studio.tests.test_pr9.Pr9FxTest.test_split_top_h) ... ok
 
 ----------------------------------------------------------------------
-Ran 45 tests in 11.247s
+Ran 50 tests in 12.132s
 
 OK
 ```
