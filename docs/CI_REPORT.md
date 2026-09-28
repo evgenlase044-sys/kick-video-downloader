@@ -31,18 +31,17 @@ server.py: {'already': 27, 'skipped': 1}
   already  version-mtime                marker present
   already  main-secure                  marker present
 
-web/editor.js: {'already': 6, 'applied': 4}
+web/editor.js: {'already': 10}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
   already  addfx-v2                     marker present
   already  addfx-source                 marker present
-  applied  addfx-count                  1x
-  applied  addfx-fxtrack                1x
-  applied  fx-add-identity              replaced 675 chars
-  applied  fx-unique-id                 1x
+  already  addfx-count                  marker present
+  already  addfx-fxtrack                marker present
+  already  fx-add-identity              marker present
+  already  fx-unique-id                 marker present
   already  flash-fxpeak                 marker present
-  -> written web/editor.js
 
 web/index.html: {'skipped': 2, 'already': 3}
   skipped  drop-dead-exporter           guard declined
@@ -52,7 +51,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T05:33:54Z, c5c10d8)
+# CI report (2026-09-28T05:36:12Z, 0bfbe97)
 
 ### ✅ python compile
 ```
@@ -135,9 +134,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5579859e8680] Impossible to open '/tmp/tmps0zzju9x/ovjob/000000.png'
-[in#1 @ 0x5579859dddc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmps0zzju9x/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x55d432916680] Impossible to open '/tmp/tmpqbark0dh/ovjob/000000.png'
+[in#1 @ 0x55d43290bdc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmpqbark0dh/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -156,7 +155,7 @@ test_gl_lens_shader_has_no_debug_output (studio.tests.test_pr7.Pr7PatchesTest.te
 test_server_patches (studio.tests.test_pr7.Pr7PatchesTest.test_server_patches) ... ok
 
 ----------------------------------------------------------------------
-Ran 35 tests in 10.101s
+Ran 35 tests in 9.609s
 
 OK
 ```
@@ -295,43 +294,3 @@ overlay_export selftest: OK
 
 ```
 
-## Probe
-
-#### editor.js addEffectAtPlayhead
-```
-    function addEffectAtPlayhead(kind, color, overrides) {
-        // studio:fx-add-identity - the new clip is found by identity on the SAME
-        // track addFxClip() writes to; returns the clip (or null).
-        // §7.3 (W): whip ставится на ближайший рез (граница нарезки/клипа)
-        if (overrides && overrides.snapToCut) {
-            const cut = nearestCutTo(state.currentTime);
-            if (cut != null) seekTo(cut);
-        }
-        const tid = ensureFxTrack();
-        const before = new Set(state.tracks[tid] || []);
-        addFxClip(kind, color);
-        const c = (state.tracks[tid] || []).find(x => !before.has(x));
-        if (!c) return null;
-        if (c.isFx && overrides) {
-            const ov = Object.assign({}, overrides);
-            delete ov.snapToCut;
-            Object.assign(c, ov);
-            c.sourceDuration = c.duration;
-            c.title = fxLabel(c);
-        }
-        renderTimeline();
-        saveProject();
-        return c;
-    }
-    function nearestCutTo(t) {
-        const cuts = [];
-        for (const r of sortedRegions()) {
-```
-
-#### editor.js fx ids + studioAddFx loop
-```
-5272:    function tidOfFx() {
-5358:            id: "fx_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),  // studio:fx-unique-id
-6201:                if (addEffectAtPlayhead(kind, f.color || "white", ov)) added++;  // studio:addfx-count
-6206:        const fxTid = ensureFxTrack();  // studio:addfx-fxtrack
-```
