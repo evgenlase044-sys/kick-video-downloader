@@ -52,6 +52,13 @@ SERVER_PATCHES = [
                "peak_factor=_studio.DOWNLOAD_PEAK_FACTOR)  # studio:disk-peak\n"
                "    if not space_check[\"is_enough\"]:\n"),
           marker="studio:disk-peak"),
+    # PR #7: /api/check-disk used 1x while /api/start-download uses the 2x peak
+    # -> UI said "enough", the download then refused. Same rule everywhere now.
+    Patch(id="check-disk-peak",
+          old="    return disk_manager.check_space(req.required_bytes)\n",
+          new=("    return disk_manager.check_space(req.required_bytes, "
+               "peak_factor=_studio.DOWNLOAD_PEAK_FACTOR)  # studio:check-disk-peak\n"),
+          marker="studio:check-disk-peak"),
     # §3 exact fps
     Patch(id="fps-exact-init", group="fps",
           old=("    fps = 60\n    try:\n        cmd = [\n"
@@ -171,4 +178,17 @@ SERVER_PATCHES = [
           old="        mtime = int(os.path.getmtime(os.path.join(BASE_DIR, \"server.py\")) * 1000)\n",
           new="        mtime = _studio.code_mtime_ms(BASE_DIR)  # studio:version-mtime\n",
           marker="studio:version-mtime"),
+    # PR #7 §4: `python server.py` started the OLD server (0.0.0.0-style, no token,
+    # no Host/Origin checks, no export pipeline). Now it starts studio_server.
+    Patch(id="main-secure",
+          old="if __name__ == \"__main__\":\n    run_server()",
+          new=("if __name__ == \"__main__\":\n"
+               "    # studio:main-secure - hardened server (127.0.0.1 + token + Host/Origin checks +\n"
+               "    # export pipeline). The old unprotected server: KICK_LEGACY_SERVER=1 python server.py\n"
+               "    if os.environ.get(\"KICK_LEGACY_SERVER\") == \"1\":\n"
+               "        run_server()\n"
+               "    else:\n"
+               "        import studio_server\n"
+               "        sys.exit(studio_server.main())"),
+          marker="studio:main-secure"),
 ]

@@ -11,6 +11,8 @@ install(server):
    wrapper applying per-clip studio options and, when the browser uploaded a
    canvas text layer, disabling ASS text and burning the canvas layer in one
    final pass. If that fails, the clip is re-exported with ASS text.
+   Every finished file then goes through the loudness gate (studio.loudness):
+   both server.py audio paths end at the same -14 LUFS / -1 dBTP.
 4. routes: WS /ws/overlay/{clip_id}, POST /api/studio/export-options,
    GET /api/studio/export-report.
 """
@@ -24,6 +26,7 @@ from typing import Any, Dict, Optional
 from studio import ffmpeg_argv as FA
 from studio import ffmpeg_caps
 from studio import grade as G
+from studio import loudness as LN
 from studio import overlay as OV
 
 TEMPLATE_OPTS = {
@@ -167,6 +170,24 @@ def _result_files(res, export_dir):
     return files
 
 
+def loudness_pass(res, export_dir):
+    """Measure every exported file; re-normalize (linear 2nd pass) when off target.
+    STUDIO_LOUDNESS_GATE=0 disables it."""
+    if os.environ.get("STUDIO_LOUDNESS_GATE", "1") == "0" or not isinstance(res, dict):
+        return res
+    for entry, path in _result_files(res, export_dir):
+        if not os.path.isfile(path):
+            continue
+        try:
+            info = LN.ensure(path)
+        except Exception as exc:              # never lose a rendered clip over this
+            info = {"checked": False, "error": str(exc)[:200]}
+        if info.get("checked"):
+            entry["loudness"] = info
+            REPORT.append({"t": time.time(), "out": os.path.basename(path), "loudness": info})
+    return res
+
+
 def _strip_text(clip):
     for k, v in (("subtitles", []), ("text_items", []), ("subtitle_mode", "none")):
         try:
@@ -247,20 +268,20 @@ def make_export_wrapper(server, original):
             job = OV.take(cid) if cid else None
             plan.append((c, opts, job))
         if not any(o or j for _, o, j in plan):
-            return original(req)
+            return loudness_pass(original(req), export_dir)
         if len(clips) == 1:
             c, o, j = plan[0]
-            return run_one(req, c, o, j)
+            return loudness_pass(run_one(req, c, o, j), export_dir)
         results = []
         for i, (c, o, j) in enumerate(plan):
             tpl = req.name_template or "{channel}_{date}_{n}_{title}"
             sub = Req(pack_name=req.pack_name, clips=[c], name_template=tpl.replace("{n}", str(i + 1)))
             results.append(run_one(sub, c, o, j))
-        return _merge(results)
+        return loudness_pass(_merge(results), export_dir)
 
     export_clip_pack.__annotations__ = {"req": Req}
     export_clip_pack.__name__ = "export_clip_pack"
-    export_clip_pack.__doc__ = (original.__doc__ or "") + "\n(studio: template options + canvas text layer)"
+    export_clip_pack.__doc__ = (original.__doc__ or "") + "\n(studio: template options + canvas text layer + loudness gate)"
     export_clip_pack.studio = True
     return export_clip_pack
 
@@ -294,6 +315,7 @@ def install(server):
         wrapped = make_export_wrapper(server, server.export_clip_pack)
         server.export_clip_pack = wrapped
         info["export_route"] = _replace_route(server.app, "/api/export-pack", "POST", wrapped)
+        info["loudness_gate"] = os.environ.get("STUDIO_LOUDNESS_GATE", "1") != "0"
 
     overlay_root = os.path.join(server.DOWNLOADS_DIR, ".overlays")
 
