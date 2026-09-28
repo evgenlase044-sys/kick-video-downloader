@@ -11,11 +11,12 @@ run() {
 }
 echo "# CI report ($(date -u +%Y-%m-%dT%H:%M:%SZ), $(git rev-parse --short HEAD 2>/dev/null))"
 echo
-run "python compile" python -m compileall -q server.py studio_server.py cli.py downloader.py size_calculator.py disk_manager.py kick_extractor.py studio
+run "python compile" python -m compileall -q server.py studio_server.py cli.py downloader.py size_calculator.py disk_manager.py kick_extractor.py chat_recorder.py studio
 run "anchored patches (server.py / editor.js / index.html)" python -m studio.patching
 run "python regression tests" python -m unittest discover -s studio/tests -t . -v
 run "server imports with fixes (studio.loader)" python -c "import studio.loader as l; s=l.load_server(); bad=[r for r in s._STUDIO_PATCH_REPORT if r['status']=='failed' and r['required']]; print(len(s._STUDIO_PATCH_REPORT),'patches'); assert not bad, bad"
 run "export pipeline installs into the real server" python -c "import studio.loader as l, studio.export_pipeline as E; s=l.load_server(); i=E.install(s); print(i); assert i.get('grade') and i.get('encoder_shim') and i.get('export_route') and i.get('loudness_gate'), i"
+run "studio API exposes chat recording (PR #10)" python -c "import studio.api as A; r=A.build_router('downloads'); p={x.path for x in r.routes}; print(sorted(p)); assert {'/api/studio/chat/record','/api/studio/chat/stop','/api/studio/chat/status'} <= p, p"
 run "web core selftest" node web/core/selftest.js
 run "web audit selftest" node web/core/selftest_audit.js
 run "overlay export selftest" node web/studio/selftest_overlay.js
