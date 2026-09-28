@@ -222,7 +222,7 @@
                 const colors = ["white", "red", "green"];
                 if (state._fxColorIdx == null) state._fxColorIdx = 0;
                 const col = e.shiftKey ? colors[(state._fxColorIdx++) % colors.length] : "white";
-                addEffectAtPlayhead("flash", col, { duration: 0.18, peak: 0.95, fxSound: "impact_epic" });
+                addEffectAtPlayhead("flash", col, { duration: 0.18, peak: 0.95, fxPeak: 0.95, fxSound: "impact_epic" });  // studio:flash-fxpeak
             } else if (e.code === "KeyX") {
                 // §7.3: шейк 14 px / 350 мс в плейхеде
                 addEffectAtPlayhead("shake", "white", { duration: 0.35, fxAmp: 14, fxSound: "whoosh_fast" });
@@ -6136,50 +6136,82 @@
         configurable: true
     });
 
-    window.studioAddFx = function(fxList, baseTime = 0) {
-        if (!Array.isArray(fxList) || !fxList.length) return;
-        const tid = ensureFxTrack();
-        ensureTracksInitialized();
-        for (const f of fxList) {
-            const start = baseTime + (f.start || 0);
-            const dur = Math.max(0.05, (f.end != null ? (f.end - f.start) : (f.duration || 0.35)));
-            const c = {
-                id: "fx_" + Math.random().toString(36).slice(2, 9),
-                trackId: tid,
-                startTime: Math.max(0, start),
-                duration: dur,
-                sourceOffset: 0,
-                sourceDuration: dur,
-                title: "",
-                isFx: true,
-                fxKind: f.kind || "flash",
-                fxColor: f.color || "white",
-                fxPeak: f.amp != null ? f.amp : (f.peak != null ? f.peak : 0.75),
-                fxSound: f.sfx || f.fxSound || "none",
-                fxGain: 1.0,
-                fxBarH: 160,
-                fxAmp: (f.amp ? Math.round(f.amp * 100) : 12),
-                fxFreq: 7,
-                media: null,
-                volume: 1.0,
-                opacity: 1.0
-            };
-            if (f.anchor) c.anchor = f.anchor;
-            c.title = fxLabel(c);
-            (state.tracks[tid] = state.tracks[tid] || []).push(c);
+    // studio:addfx-v2 - template/moment fx go through the SAME builder as the
+    // hotkeys (addEffectAtPlayhead): per-kind fields (zoom/lens/threshold/flash
+    // -> fxPeak, shake -> fxAmp/fxFreq), anchor for the face zoom, and the
+    // moment's SOURCE time is mapped onto the timeline via the clip showing it.
+    function studioSourceToTimeline(srcT) {
+        let best = null;
+        const ids = (typeof videoTrackIds === "function") ? videoTrackIds() : [];
+        for (const tid of ids) {
+            for (const c of (state.tracks[tid] || [])) {
+                if (!c || !c.media || c.isFx) continue;
+                const off = Number(c.sourceOffset) || 0;
+                const rate = Number(c.speed) > 0 ? Number(c.speed) : 1;
+                const srcLen = (Number(c.duration) || 0) * rate;
+                if (srcT >= off && srcT < off + srcLen) {
+                    const t = c.startTime + (srcT - off) / rate;
+                    if (best === null || t < best) best = t;
+                }
+            }
         }
-        state.tracks[tid].sort((a, b) => a.startTime - b.startTime);
+        return best;
+    }
+    window.studioSourceToTimeline = studioSourceToTimeline;
+
+    window.studioAddFx = function (fxList, baseTime, opts) {
+        if (!Array.isArray(fxList) || !fxList.length) return 0;
+        const o = opts || {};
+        let base = Number(baseTime) || 0;
+        if (o.timeBase === "source") {
+            const mapped = studioSourceToTimeline(base);
+            if (mapped === null) {
+                showToast("Момент не попадает ни в один клип на таймлайне: эффекты не добавлены", "info");
+                return 0;
+            }
+            base = mapped;
+        }
+        const savedTime = state.currentTime;
+        let added = 0;
+        try {
+            for (const f of fxList) {
+                if (!f || !f.kind) continue;
+                const kind = String(f.kind);
+                const s = Number(f.start) || 0;
+                const dur = Math.max(0.05, f.end != null ? (Number(f.end) - s) : (Number(f.duration) || 0.35));
+                const ov = { duration: dur, fxSound: f.sfx || f.fxSound || "none" };
+                if (kind === "zoom") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.15;
+                else if (kind === "lens") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.18;
+                else if (kind === "threshold") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.45;
+                else if (kind === "flash") ov.fxPeak = f.peak != null ? Number(f.peak) : 0.75;
+                else if (kind === "shake") {
+                    ov.fxAmp = f.amp != null ? Number(f.amp) : 12;
+                    if (f.freq != null) ov.fxFreq = Number(f.freq);
+                }
+                if (f.anchor) ov.anchor = f.anchor;
+                const before = (state.tracks[tidOfFx()] || []).length;
+                state.currentTime = Math.max(0, base + s);
+                addEffectAtPlayhead(kind, f.color || "white", ov);
+                if ((state.tracks[tidOfFx()] || []).length > before) added++;
+            }
+        } finally {
+            state.currentTime = savedTime;
+        }
+        const fxTid = tidOfFx();
+        if (state.tracks[fxTid]) state.tracks[fxTid].sort((a, b) => a.startTime - b.startTime);
         recalcTotalDuration();
         renderTimeline();
+        syncVideoToCurrentTime();
         saveProject();
+        return added;
     };
 
     document.addEventListener("studio:template-plan", (e) => {
         const plan = e.detail;
         if (plan && Array.isArray(plan.fx) && plan.fx.length) {
             const base = (plan.moment && typeof plan.moment.start === "number") ? plan.moment.start : state.currentTime;
-            window.studioAddFx(plan.fx, base);
-            showToast(`Шаблон «${plan.template || ""}»: добавлено ${plan.fx.length} эффектов на таймлайн`, "ok");
+            const added = window.studioAddFx(plan.fx, base, { timeBase: "source" });  // studio:addfx-source
+            if (added) showToast(`Шаблон «${plan.template || ""}»: добавлено ${added} эффектов на таймлайн`, "ok");
         }
     });
 

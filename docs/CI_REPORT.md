@@ -1,7 +1,7 @@
 ## Fold log
 ```
 
-server.py: {'already': 25, 'skipped': 1}
+server.py: {'already': 25, 'applied': 2, 'skipped': 1}
   already  hooks-import                 marker present
   already  progress-nameerror           marker present
   already  cookies-range                marker present
@@ -10,6 +10,7 @@ server.py: {'already': 25, 'skipped': 1}
   already  ssrf-guard                   marker present
   already  ssrf-remember                marker present
   already  disk-peak                    marker present
+  applied  check-disk-peak              1x
   already  fps-exact-init               marker present
   already  fps-exact-probe              marker present
   already  fps-exact-return             marker present
@@ -28,11 +29,17 @@ server.py: {'already': 25, 'skipped': 1}
   already  whip-clamp-x                 marker present
   skipped  dead-ass-generator           guard declined
   already  version-mtime                marker present
+  applied  main-secure                  1x
+  -> written server.py
 
-web/editor.js: {'already': 3}
+web/editor.js: {'already': 3, 'applied': 3}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
+  applied  addfx-v2                     replaced 1494 chars
+  applied  addfx-source                 1x
+  applied  flash-fxpeak                 1x
+  -> written web/editor.js
 
 web/index.html: {'skipped': 2, 'already': 3}
   skipped  drop-dead-exporter           guard declined
@@ -42,7 +49,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T05:19:58Z, e75770c)
+# CI report (2026-09-28T05:27:37Z, 2909285)
 
 ### ✅ python compile
 ```
@@ -52,7 +59,7 @@ web/index.html: {'skipped': 2, 'already': 3}
 ### ✅ anchored patches (server.py / editor.js / index.html)
 ```
 
-server.py: {'already': 25, 'skipped': 1}
+server.py: {'already': 27, 'skipped': 1}
   already  hooks-import                 marker present
   already  progress-nameerror           marker present
   already  cookies-range                marker present
@@ -61,6 +68,7 @@ server.py: {'already': 25, 'skipped': 1}
   already  ssrf-guard                   marker present
   already  ssrf-remember                marker present
   already  disk-peak                    marker present
+  already  check-disk-peak              marker present
   already  fps-exact-init               marker present
   already  fps-exact-probe              marker present
   already  fps-exact-return             marker present
@@ -79,11 +87,15 @@ server.py: {'already': 25, 'skipped': 1}
   already  whip-clamp-x                 marker present
   skipped  dead-ass-generator           guard declined
   already  version-mtime                marker present
+  already  main-secure                  marker present
 
-web/editor.js: {'already': 3}
+web/editor.js: {'already': 6}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
+  already  addfx-v2                     marker present
+  already  addfx-source                 marker present
+  already  flash-fxpeak                 marker present
 
 web/index.html: {'skipped': 2, 'already': 3}
   skipped  drop-dead-exporter           guard declined
@@ -93,7 +105,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-### ✅ python regression tests
+### ❌ python regression tests (exit 1)
 ```
 test_peak_and_safety (studio.tests.test_audit.DiskManagerTest.test_peak_and_safety) ... ok
 test_server_patch_signature (studio.tests.test_audit.DiskManagerTest.test_server_patch_signature) ... ok
@@ -116,9 +128,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5609ae8ac680] Impossible to open '/tmp/tmpmzdsycdh/ovjob/000000.png'
-[in#1 @ 0x5609ae8a1dc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmpmzdsycdh/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x564a0a417680] Impossible to open '/tmp/tmp3aqmnpze/ovjob/000000.png'
+[in#1 @ 0x564a0a40cdc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmp3aqmnpze/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -127,24 +139,40 @@ test_passthrough_without_options (studio.tests.test_export_pipeline.ExportWrappe
 test_grade_chain_runs (studio.tests.test_export_pipeline.GradeAndOverlayTest.test_grade_chain_runs) ... ok
 test_header_validation (studio.tests.test_export_pipeline.GradeAndOverlayTest.test_header_validation) ... ok
 test_overlay_lands_on_exact_frame (studio.tests.test_export_pipeline.GradeAndOverlayTest.test_overlay_lands_on_exact_frame) ... ok
+test_export_wrapper_applies_gate_on_plain_exports (studio.tests.test_pr7.LoudnessGateTest.test_export_wrapper_applies_gate_on_plain_exports) ... ok
+test_loud_clip_true_peak_limited (studio.tests.test_pr7.LoudnessGateTest.test_loud_clip_true_peak_limited) ... ok
+test_no_audio_is_skipped (studio.tests.test_pr7.LoudnessGateTest.test_no_audio_is_skipped) ... ok
+test_on_target_clip_untouched (studio.tests.test_pr7.LoudnessGateTest.test_on_target_clip_untouched) ... ok
+test_quiet_clip_is_normalized_and_video_kept (studio.tests.test_pr7.LoudnessGateTest.test_quiet_clip_is_normalized_and_video_kept) ... ok
+test_editor_patches (studio.tests.test_pr7.Pr7PatchesTest.test_editor_patches) ... ok
+test_gl_lens_shader_has_no_debug_output (studio.tests.test_pr7.Pr7PatchesTest.test_gl_lens_shader_has_no_debug_output) ... FAIL
+test_server_patches (studio.tests.test_pr7.Pr7PatchesTest.test_server_patches) ... ok
+
+======================================================================
+FAIL: test_gl_lens_shader_has_no_debug_output (studio.tests.test_pr7.Pr7PatchesTest.test_gl_lens_shader_has_no_debug_output)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr7.py", line 120, in test_gl_lens_shader_has_no_debug_output
+    self.assertNotIn("DEBUG", src)
+AssertionError: 'DEBUG' unexpectedly found in '/* Kick Clip Studio — web/core/render/glPasses.js\n * PLAN §12.4/§13/§20: GPU (WebGL2) versions of the render cores.\n * The shaders mirror the pure JS kernels (effects.js / lens.js) formula-by-\n * formula; the GPU<->JS equivalence gate in verify_all.py runs both on the\n * same deterministic inputs inside headless Electron and compares.\n * Browser-only (needs WebGL2 + EXT_color_buffer_float). */\n(function (root) {\n    "use strict";\n\n    const VS_FULLSCREEN = [\n        "#version 300 es",\n        "in vec2 p; out vec2 vUv;",\n        "void main(){ vUv = p*0.5+0.5; gl_Position = vec4(p,0.,1.); }"\n    ].join("\\n");\n\n    function compile(gl, type, src) {\n        const s = gl.createShader(type);\n        gl.shaderSource(s, src);\n        gl.compileShader(s);\n        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {\n            throw new Error("shader: " + gl.getShaderInfoLog(s));\n        }\n        return s;\n    }\n\n    function program(gl, fs) {\n        const prog = gl.createProgram();\n        gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS_FULLSCREEN));\n        gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, fs));\n        gl.linkProgram(prog);\n        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {\n            throw new Error("link: " + gl.getProgramInfoLog(prog));\n        }\n        return prog;\n    }\n\n    function makeFBO(gl, W, H, floatMode) {\n        const tex = gl.createTexture();\n        gl.activeTexture(gl.TEXTURE0);\n        gl.bindTexture(gl.TEXTURE_2D, tex);\n        gl.texImage2D(gl.TEXTURE_2D, 0, floatMode ? gl.RGBA32F : gl.RGBA8,\n                      W, H, 0, gl.RGBA, floatMode ? gl.FLOAT : gl.UNSIGNED_BYTE, null);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);\n        const fbo = gl.createFramebuffer();\n        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);\n        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);\n        const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);\n        gl.bindFramebuffer(gl.FRAMEBUFFER, null);\n        if (st !== gl.FRAMEBUFFER_COMPLETE) {\n            throw new Error("FBO incomplete: 0x" + st.toString(16) + " float=" + floatMode);\n        }\n        return { tex: tex, fbo: fbo, W: W, H: H };\n    }\n\n    function drawTo(gl, fbo, W, H) {\n        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo ? fbo.fbo : null);\n        gl.viewport(0, 0, W, H);\n        gl.drawArrays(gl.TRIANGLES, 0, 3);\n    }\n\n    function makeQuad(gl, prog) {\n        gl.useProgram(prog);\n        const buf = gl.createBuffer();\n        gl.bindBuffer(gl.ARRAY_BUFFER, buf);\n        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);\n        const loc = gl.getAttribLocation(prog, "p");\n        gl.enableVertexAttribArray(loc);\n        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);\n    }\n\n    function makeContext(W, H) {\n        const canvas = document.createElement("canvas");\n        canvas.width = W; canvas.height = H;\n        const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true });\n        if (!gl) throw new Error("WebGL2 unavailable");\n        gl.getExtension("EXT_color_buffer_float");\n        gl.getExtension("OES_texture_float_linear");\n        return { canvas: canvas, gl: gl };\n    }\n\n    function bindTex(gl, tex) {\n        gl.activeTexture(gl.TEXTURE0);\n        gl.bindTexture(gl.TEXTURE_2D, tex);\n    }\n\n    // ── SDF stroke: jump flood (§12.4) ───────────────────────────────────\n    // vPx is computed IN the fragment shader from the interpolated vUv.\n    const FS_JFA_STEP = [\n        "#version 300 es",\n        "precision highp float;",\n        "uniform highp sampler2D uSeeds; uniform highp ivec2 uSize; uniform int uStep;",\n        "in vec2 vUv; out vec4 o;",\n        "void main(){",\n        "  ivec2 vPx = ivec2(vUv * vec2(uSize));",\n        "  vec2 best = vec2(-1.0); float bd = 1e30;",\n        "  vec2 self = texelFetch(uSeeds, vPx, 0).xy;",\n        "  if (self.x >= 0.0) { bd = 0.0; best = self; }",\n        "  for (int oy = -1; oy <= 1; oy++) for (int ox = -1; ox <= 1; ox++) {",\n        "    if (ox == 0 && oy == 0) continue;",\n        "    ivec2 n = vPx + ivec2(ox, oy) * uStep;",\n        "    if (n.x < 0 || n.y < 0 || n.x >= uSize.x || n.y >= uSize.y) continue;",\n        "    vec2 s = texelFetch(uSeeds, n, 0).xy;",\n        "    if (s.x < 0.0) continue;",\n        "    float dist = length(s - vec2(vPx));",\n        "    if (dist < bd) { bd = dist; best = s; }",\n        "  }",\n        "  o = vec4(best, 0.0, 1.0);",\n        "}"\n    ].join("\\n");\n    const FS_STROKE = [\n        "#version 300 es",\n        "precision highp float;",\n        "uniform highp sampler2D uSeeds; uniform highp ivec2 uSize; uniform float uRadius;",\n        "in vec2 vUv; out vec4 o;",\n        "void main(){",\n        "  ivec2 vPx = ivec2(vUv * vec2(uSize));",\n        "  vec2 s = texelFetch(uSeeds, vPx, 0).xy;",\n        "  float a = 0.0;",\n        "  if (s.x >= 0.0) {",\n        "    float d = length(s - vec2(vPx));",\n        "    float t = clamp((uRadius + 0.5 - d) / 1.0, 0.0, 1.0);",\n        "    a = t * t * (3.0 - 2.0 * t);",\n        "  }",\n        "  o = vec4(a, a, a, 1.0);",\n        "}"\n    ].join("\\n");\n\n    function StrokePass(W, H) {\n        const ctx = makeContext(W, H);\n        this.gl = ctx.gl;\n        this.W = W; this.H = H;\n        this.progStep = program(this.gl, FS_JFA_STEP);\n        this.progStroke = program(this.gl, FS_STROKE);\n        makeQuad(this.gl, this.progStep);\n        makeQuad(this.gl, this.progStroke);\n        this.a = makeFBO(this.gl, W, H, true);\n        this.b = makeFBO(this.gl, W, H, true);\n        this.sizeLoc = this.gl.getUniformLocation(this.progStep, "uSize");\n        this.stepLoc = this.gl.getUniformLocation(this.progStep, "uStep");\n        this.seedsLoc = this.gl.getUniformLocation(this.progStep, "uSeeds");\n        this.sizeLoc2 = this.gl.getUniformLocation(this.progStroke, "uSize");\n        this.radLoc = this.gl.getUniformLocation(this.progStroke, "uRadius");\n        this.seedsLoc2 = this.gl.getUniformLocation(this.progStroke, "uSeeds");\n    }\n\n    /** mask: Uint8Array (0/255) -> Float32Array stroke alpha. */\n    StrokePass.prototype.run = function (mask, radius) {\n        const gl = this.gl, W = this.W, H = this.H;\n        const seed = new Float32Array(W * H * 4);\n        for (let i = 0; i < W * H; i++) {\n            if (mask[i]) { seed[i * 4] = i % W; seed[i * 4 + 1] = (i / W) | 0; }\n            else { seed[i * 4] = -1; seed[i * 4 + 1] = -1; }\n        }\n        const seedTex = gl.createTexture();\n        bindTex(gl, seedTex);\n        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, H, 0, gl.RGBA, gl.FLOAT, seed);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);\n\n        gl.useProgram(this.progStep);\n        gl.uniform2i(this.sizeLoc, W, H);\n        gl.uniform1i(this.seedsLoc, 0);\n        let steps = 1;\n        while (steps < Math.max(W, H)) steps <<= 1;\n        let srcTex = seedTex;\n        for (; steps >= 1; steps >>= 1) {\n            bindTex(gl, srcTex);                       // re-bind: makeFBO clobbers unit 0\n            gl.uniform1i(this.stepLoc, steps);\n            drawTo(gl, this.b, W, H);\n            const t = this.a; this.a = this.b; this.b = t;\n            srcTex = this.a.tex;\n        }\n\n        gl.useProgram(this.progStroke);\n        gl.uniform2i(this.sizeLoc2, W, H);\n        gl.uniform1f(this.radLoc, radius);\n        gl.uniform1i(this.seedsLoc2, 0);\n        const outFbo = makeFBO(gl, W, H, true);\n        bindTex(gl, this.a.tex);                       // re-bind after makeFBO\n        drawTo(gl, outFbo, W, H);\n        const px = new Float32Array(W * H * 4);\n        gl.bindFramebuffer(gl.FRAMEBUFFER, outFbo.fbo);\n        gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, px);\n        const alpha = new Float32Array(W * H);\n        for (let i = 0; i < W * H; i++) alpha[i] = px[i * 4];\n        return alpha;\n    };\n\n    // ── dual-Kawase (§12.4) — texelFetch mirrors the JS taps exactly ─────\n    const FS_KAWASE_DOWN = [\n        "#version 300 es",\n        "precision highp float;",\n        "uniform highp sampler2D uSrc; uniform highp ivec2 uSrcSize; uniform highp ivec2 uDstSize;",\n        "in vec2 vUv; out vec4 o;",\n        "void main(){",\n        "  ivec2 vPx = ivec2(vUv * vec2(uDstSize));",\n        "  ivec2 s = vPx * 2;",\n        "  ivec2 s1 = min(ivec2(uSrcSize.x - 1, uSrcSize.y - 1), s + 1);",\n        "  float a = texelFetch(uSrc, ivec2(s.x, s.y), 0).r;",\n        "  float b = texelFetch(uSrc, ivec2(s1.x, s.y), 0).r;",\n        "  float c = texelFetch(uSrc, ivec2(s.x, s1.y), 0).r;",\n        "  float d = texelFetch(uSrc, ivec2(s1.x, s1.y), 0).r;",\n        "  o = vec4(vec3((a + b + c + d) * 0.25), 1.0);",\n        "}"\n    ].join("\\n");\n    const FS_KAWASE_UP = [\n        "#version 300 es",\n        "precision highp float;",\n        "uniform highp sampler2D uSrc; uniform highp ivec2 uSrcSize; uniform highp ivec2 uDstSize;",\n        "in vec2 vUv; out vec4 o;",\n        "void main(){",\n        "  ivec2 vPx = ivec2(vUv * vec2(uDstSize));",\n        "  vec2 f = max(vec2(0.0), min(vec2(uSrcSize - ivec2(1)), (vec2(vPx) - 0.5) * 0.5));",\n        "  ivec2 i0 = ivec2(floor(f));",\n        "  vec2 w = f - vec2(i0);",\n        "  ivec2 i1 = min(i0 + ivec2(1), uSrcSize - ivec2(1));",\n        "  float a = texelFetch(uSrc, ivec2(i0.x, i0.y), 0).r;",\n        "  float b = texelFetch(uSrc, ivec2(i1.x, i0.y), 0).r;",\n        "  float c = texelFetch(uSrc, ivec2(i0.x, i1.y), 0).r;",\n        "  float d = texelFetch(uSrc, ivec2(i1.x, i1.y), 0).r;",\n        "  float v = mix(mix(a, b, w.x), mix(c, d, w.x), w.y);",\n        "  o = vec4(vec3(v), 1.0);",\n        "}"\n    ].join("\\n");\n\n    function KawasePass(W, H) {\n        const ctx = makeContext(W, H);\n        this.gl = ctx.gl;\n        this.W = W; this.H = H;\n        this.progDown = program(this.gl, FS_KAWASE_DOWN);\n        this.progUp = program(this.gl, FS_KAWASE_UP);\n        makeQuad(this.gl, this.progDown);\n        makeQuad(this.gl, this.progUp);\n    }\n\n    /** src: Float32Array -> blurred Float32Array (GPU). */\n    KawasePass.prototype.run = function (src, passes) {\n        const gl = this.gl;\n        const tex = gl.createTexture();\n        bindTex(gl, tex);\n        const rgbaSrc = new Float32Array(this.W * this.H * 4);   // RGBA32F needs 4 comps\n        for (let i = 0; i < this.W * this.H; i++) rgbaSrc[i * 4] = src[i];\n        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, this.W, this.H, 0, gl.RGBA, gl.FLOAT, rgbaSrc);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);\n\n        const chain = [{ tex: tex, W: this.W, H: this.H, fbo: makeFBO(gl, this.W, this.H, true) }];\n        gl.useProgram(this.progDown);\n        gl.uniform1i(gl.getUniformLocation(this.progDown, "uSrc"), 0);\n        let cur = { W: this.W, H: this.H };\n        for (let i = 0; i < passes && cur.W >= 2 && cur.H >= 2; i++) {\n            const nw = cur.W >> 1, nh = cur.H >> 1;\n            const fbo = makeFBO(gl, nw, nh, true);\n            bindTex(gl, chain[i].tex);                 // re-bind after makeFBO\n            gl.uniform2i(gl.getUniformLocation(this.progDown, "uSrcSize"), cur.W, cur.H);\n            gl.uniform2i(gl.getUniformLocation(this.progDown, "uDstSize"), nw, nh);\n            drawTo(gl, fbo, nw, nh);\n            chain.push({ tex: fbo.tex, W: nw, H: nh, fbo: fbo });\n            cur = { W: nw, H: nh };\n        }\n        gl.useProgram(this.progUp);\n        gl.uniform1i(gl.getUniformLocation(this.progUp, "uSrc"), 0);\n        for (let i = chain.length - 2; i >= 0; i--) {\n            const dst = chain[i];\n            bindTex(gl, chain[i + 1].tex);\n            gl.uniform2i(gl.getUniformLocation(this.progUp, "uSrcSize"), chain[i + 1].W, chain[i + 1].H);\n            gl.uniform2i(gl.getUniformLocation(this.progUp, "uDstSize"), dst.W, dst.H);\n            drawTo(gl, dst.fbo, dst.W, dst.H);\n        }\n        const out = new Float32Array(this.W * this.H * 4);\n        gl.bindFramebuffer(gl.FRAMEBUFFER, chain[0].fbo.fbo);\n        gl.readPixels(0, 0, this.W, this.H, gl.RGBA, gl.FLOAT, out);\n        const mono = new Float32Array(this.W * this.H);\n        for (let i = 0; i < this.W * this.H; i++) mono[i] = out[i * 4];\n        return mono;\n    };\n\n    // ── Lens & Detail §13.1 (lens + CA + wave) ───────────────────────────\n    const FS_LENS = [\n        "#version 300 es",\n        "precision highp float;",\n        "uniform highp sampler2D uSrc; uniform highp ivec2 uSize;",\n        "uniform float uK1, uK2, uCA, uCx, uCy, uAspect, uNorm;",\n        "uniform float uWaveA, uWaveF, uWaveV, uT;",\n        "in vec2 vUv; out vec4 o;",\n        "vec2 lensMap(vec2 uv){",\n        "  vec2 d = (uv - vec2(uCx, uCy)) * vec2(uAspect, 1.0);",\n        "  float r2 = dot(d, d);",\n        "  return vec2(uCx, uCy) + (uv - vec2(uCx, uCy)) * ((1.0 + uK1*r2 + uK2*r2*r2) / uNorm);",\n        "}",\n        "void main(){",\n        "  vec2 uv = vUv;",\n        "  uv.x += uWaveA * sin(6.28318530718 * (uv.y * uWaveF + uT * uWaveV));",\n        "  uv = lensMap(uv);",\n        "  vec2 c = vec2(uCx, uCy);",\n        "  vec2 dl = (uv - c) * vec2(uAspect, 1.0);",\n        "  float r = length(dl);",\n        "  float k = uCA * r;",\n        "  vec2 offR = (uv - c) * (1.0 + k);",\n        "  vec2 offB = (uv - c) * (1.0 - k);",\n        "  float rr = texture(uSrc, offR).r;",\n        "  float gg = texture(uSrc, uv).g;",\n        "  float bb = texture(uSrc, offB).b;",\n        "  o = vec4(uWaveA * 1000.0, uK1, uCx, uCy);",   // DEBUG\n        "}"\n    ].join("\\n");\n\n    function LensPass(W, H) {\n        const ctx = makeContext(W, H);\n        this.gl = ctx.gl;\n        this.W = W; this.H = H;\n        this.prog = program(this.gl, FS_LENS);\n        makeQuad(this.gl, this.prog);\n    }\n\n    /** rgba: Uint8Array -> lens-mapped Uint8Array (GPU). */\n    LensPass.prototype.run = function (rgba, p) {\n        const gl = this.gl;\n        const tex = gl.createTexture();\n        bindTex(gl, tex);\n        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, this.W, this.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);\n        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);\n        gl.useProgram(this.prog);\n        gl.uniform1i(gl.getUniformLocation(this.prog, "uSrc"), 0);\n        gl.uniform2i(gl.getUniformLocation(this.prog, "uSize"), this.W, this.H);\n        const aspect = p.W && p.H ? p.W / p.H : 9 / 16;\n        const cx = p.cx != null ? p.cx : 0.5, cy = p.cy != null ? p.cy : 0.5;\n        const rc = Math.hypot(Math.max(cx, aspect - cx), Math.max(cy, 1 - cy));\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uK1"), p.k1 || 0);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uK2"), p.k2 || 0);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uCA"), (p.ca || 0) / (p.W || 1080));\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uCx"), cx);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uCy"), cy);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uAspect"), aspect);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uNorm"),\n                     1 + (p.k1 || 0) * rc * rc + (p.k2 || 0) * rc * rc * rc * rc);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uWaveA"), (p.A || 0) / (p.W || 1080));\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uWaveF"), p.f || 6);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uWaveV"), p.v || 1.5);\n        gl.uniform1f(gl.getUniformLocation(this.prog, "uT"), p.t || 0);\n        drawTo(gl, null, this.W, this.H);\n        const out = new Uint8Array(this.W * this.H * 4);\n        gl.readPixels(0, 0, this.W, this.H, gl.RGBA, gl.UNSIGNED_BYTE, out);\n        return out;\n    };\n\n    root.CoreGLPasses = { StrokePass: StrokePass, KawasePass: KawasePass, LensPass: LensPass, makeContext: makeContext };\n})(typeof self !== "undefined" ? self : this);\n'
 
 ----------------------------------------------------------------------
-Ran 27 tests in 1.569s
+Ran 35 tests in 9.884s
 
-OK
+FAILED (failures=1)
 ```
 
 ### ✅ server imports with fixes (studio.loader)
 ```
-[studio] server.py patches: {'already': 25, 'skipped': 1}
-26 patches
+[studio] server.py patches: {'already': 27, 'skipped': 1}
+28 patches
 ```
 
 ### ✅ export pipeline installs into the real server
 ```
-[studio] server.py patches: {'already': 25, 'skipped': 1}
-[studio] export pipeline: {'grade': True, 'encoder_shim': True, 'export_route': True}
-{'grade': True, 'encoder_shim': True, 'export_route': True}
+[studio] server.py patches: {'already': 27, 'skipped': 1}
+[studio] export pipeline: {'grade': True, 'encoder_shim': True, 'export_route': True, 'loudness_gate': True}
+{'grade': True, 'encoder_shim': True, 'export_route': True, 'loudness_gate': True}
 ```
 
 ### ✅ web core selftest
@@ -270,237 +298,84 @@ overlay_export selftest: OK
 
 ## Probe
 
-#### editor.js definitions
+#### editor.js from studio:addfx-v2 to EOF
 ```
-5145:    function fxLabel(c) {
-5153:    function ensureFxTrack() {
-5230:    function addEffectAtPlayhead(kind, color, overrides) {
-5246:    function nearestCutTo(t) {
-5942:    function saveProject() {
-```
-
-#### editor.js addEffectAtPlayhead body
-```
-    function addEffectAtPlayhead(kind, color, overrides) {
-        // §7.3 (W): whip ставится на ближайший рез (граница нарезки/клипа)
-        if (overrides && overrides.snapToCut) {
-            const cut = nearestCutTo(state.currentTime);
-            if (cut != null) seekTo(cut);
-        }
-        const before = (state.tracks[tidOfFx()] || []).length;
-        addFxClip(kind, color);
-        const tid = tidOfFx();
-        const clips = state.tracks[tid] || [];
-        if (clips.length === before) return;
-        const c = clips[clips.length - 1];
-        if (c && c.isFx && overrides) Object.assign(c, overrides);
-        renderTimeline();
-        saveProject();
-    }
-    function nearestCutTo(t) {
-        const cuts = [];
-        for (const r of sortedRegions()) {
-            cuts.push(r.startTime, r.startTime + r.duration);
-        }
-        for (const tid of videoTrackIds()) {
+    // studio:addfx-v2 - template/moment fx go through the SAME builder as the
+    // hotkeys (addEffectAtPlayhead): per-kind fields (zoom/lens/threshold/flash
+    // -> fxPeak, shake -> fxAmp/fxFreq), anchor for the face zoom, and the
+    // moment's SOURCE time is mapped onto the timeline via the clip showing it.
+    function studioSourceToTimeline(srcT) {
+        let best = null;
+        const ids = (typeof videoTrackIds === "function") ? videoTrackIds() : [];
+        for (const tid of ids) {
             for (const c of (state.tracks[tid] || [])) {
-                if (!c.media || c.isFx) continue;
-                cuts.push(c.startTime, c.startTime + c.duration);
+                if (!c || !c.media || c.isFx) continue;
+                const off = Number(c.sourceOffset) || 0;
+                const rate = Number(c.speed) > 0 ? Number(c.speed) : 1;
+                const srcLen = (Number(c.duration) || 0) * rate;
+                if (srcT >= off && srcT < off + srcLen) {
+                    const t = c.startTime + (srcT - off) / rate;
+                    if (best === null || t < best) best = t;
+                }
             }
-        }
-        let best = null, bestD = 1.5;
-        for (const c of cuts) {
-            const d = Math.abs(c - t);
-            if (d < bestD) { bestD = d; best = c; }
         }
         return best;
     }
-    function tidOfFx() {
-        const order = trackOrder();
-        for (const tid of order) {
-            const tr = getTrack(tid);
-            if (tr && tr.kind === "video") return tid;
+    window.studioSourceToTimeline = studioSourceToTimeline;
+
+    window.studioAddFx = function (fxList, baseTime, opts) {
+        if (!Array.isArray(fxList) || !fxList.length) return 0;
+        const o = opts || {};
+        let base = Number(baseTime) || 0;
+        if (o.timeBase === "source") {
+            const mapped = studioSourceToTimeline(base);
+            if (mapped === null) {
+                showToast("Момент не попадает ни в один клип на таймлайне: эффекты не добавлены", "info");
+                return 0;
+            }
+            base = mapped;
         }
-        return ensureFxTrack();
-    }
-    // ── §9.4: пресет канала — рамки/раскладка/стиль/словарь одним нажатием (P) ──
-    async function applyChannelPreset() {
-        const handle = (state.clipper.streamerHandle || "").replace("@", "").trim();
-        if (!handle) {
-            showToast("Укажи ник стримера в поле хэндла — пресеты хранятся по нику.", "info");
-            return;
-        }
+        const savedTime = state.currentTime;
+        let added = 0;
         try {
-            const res = await fetch(`/api/presets/channel/${encodeURIComponent(handle)}`);
-            if (!res.ok) {
-                showToast(`Пресет канала «${handle}» не найден — настрой рамки и сохрани (Alt+P).`, "info");
-                return;
+            for (const f of fxList) {
+                if (!f || !f.kind) continue;
+                const kind = String(f.kind);
+                const s = Number(f.start) || 0;
+                const dur = Math.max(0.05, f.end != null ? (Number(f.end) - s) : (Number(f.duration) || 0.35));
+                const ov = { duration: dur, fxSound: f.sfx || f.fxSound || "none" };
+                if (kind === "zoom") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.15;
+                else if (kind === "lens") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.18;
+                else if (kind === "threshold") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.45;
+                else if (kind === "flash") ov.fxPeak = f.peak != null ? Number(f.peak) : 0.75;
+                else if (kind === "shake") {
+                    ov.fxAmp = f.amp != null ? Number(f.amp) : 12;
+                    if (f.freq != null) ov.fxFreq = Number(f.freq);
+                }
+                if (f.anchor) ov.anchor = f.anchor;
+                const before = (state.tracks[tidOfFx()] || []).length;
+                state.currentTime = Math.max(0, base + s);
+                addEffectAtPlayhead(kind, f.color || "white", ov);
+                if ((state.tracks[tidOfFx()] || []).length > before) added++;
             }
-            const data = await res.json();
-            const p = data.preset || {};
-            if (p.crop_box) state.clipper.cropBox = p.crop_box;
-            if (p.bg_box) state.clipper.bgBox = p.bg_box;
-            if (p.format) state.clipper.format = p.format;
-            if (p.style_pack) {
-                if (p.style_pack.subtitle_template) state.clipper.subtitleTemplate = p.style_pack.subtitle_template;
-                if (p.style_pack.sub_font) state.clipper.subFont = p.style_pack.sub_font;
-                if (p.style_pack.sub_size) state.clipper.subSize = p.style_pack.sub_size;
-                if (p.style_pack.sub_glow != null) state.clipper.subGlow = p.style_pack.sub_glow;
-                if (p.style_pack.sub_anim) state.clipper.subAnim = p.style_pack.sub_anim;
-                if (p.style_pack.color_grade) state.clipper.colorGrade = p.style_pack.color_grade;
-            }
-            if (p.asr_prompt) state.clipper.asrPrompt = p.asr_prompt;
-            if (p.layout === "fullscreen" && !p.crop_box) state.clipper.cropBox = null;
-            updateClipperUI();
-            updateTvPreview();
-            updateLiveSubtitleOverlay();
-            syncVideoToCurrentTime();
-            saveProject();
-            showToast(`Пресет канала «${handle}» применён.`, "ok");
-```
-
-#### editor.js ensureFxTrack body
-```
-    function ensureFxTrack() {
-        ensureTracksInitialized();
-        let fx = state.trackList.find(isFxTrack);
-        if (!fx) {
-            fx = {
-                id: "tfx" + Date.now().toString(36),
-                kind: "video", name: "Эффекты",
-                hidden: false, locked: false, muted: true
-            };
-            // новый слой эффектов появляется НАД верхним слоем текста
-            let idx = state.trackList.findIndex(t => t.kind === "text");
-            if (idx < 0) idx = 0;
-            state.trackList.splice(idx, 0, fx);
-            state.tracks[fx.id] = [];
-            renderTracksDOM();
+        } finally {
+            state.currentTime = savedTime;
         }
-        return fx.id;
-    }
-    // отдельный слой эффектов над текстом (кнопка "+Слой FX")
-    function addFxTrack() {
-        ensureTracksInitialized();
-        const n = state.trackList.filter(isFxTrack).length + 1;
-        const tr = {
-            id: "tfx" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-            kind: "video", name: `Эффекты ${n}`,
-            hidden: false, locked: false, muted: true
-```
-
-#### editor.js fxLabel body
-```
-    function fxLabel(c) {
-        if (!c || !c.isFx) return "";
-        if (c.fxKind === "flash") return FX_LABEL["flash_" + (c.fxColor || "white")] || "⚡ Вспышка";
-        return FX_LABEL[c.fxKind] || "FX";
-    }
-    function isFxTrack(t) {
-        return t && t.kind === "video" && /fx|эффект/i.test(t.name || "");
-    }
-    function ensureFxTrack() {
-        ensureTracksInitialized();
-        let fx = state.trackList.find(isFxTrack);
-        if (!fx) {
-            fx = {
-                id: "tfx" + Date.now().toString(36),
-                kind: "video", name: "Эффекты",
-                hidden: false, locked: false, muted: true
-            };
-            // новый слой эффектов появляется НАД верхним слоем текста
-            let idx = state.trackList.findIndex(t => t.kind === "text");
-            if (idx < 0) idx = 0;
-            state.trackList.splice(idx, 0, fx);
-```
-
-#### editor.js hotkeys addEffectAtPlayhead calls
-```
-225:                addEffectAtPlayhead("flash", col, { duration: 0.18, peak: 0.95, fxSound: "impact_epic" });
-228:                addEffectAtPlayhead("shake", "white", { duration: 0.35, fxAmp: 14, fxSound: "whoosh_fast" });
-231:                addEffectAtPlayhead("zoom", "white", { duration: 0.35, fxPeak: 0.15, fxSound: "whoosh_cinematic" });
-234:                addEffectAtPlayhead("lens", "white", { duration: 0.25, fxPeak: 0.18, fxSound: "whoosh_magic" });
-237:                addEffectAtPlayhead("threshold", "white", { duration: 0.067, fxPeak: 0.45, fxSound: "hit_small" });
-240:                addEffectAtPlayhead("whip", "white", { duration: 0.12, fxSound: "whoosh_fast", snapToCut: true });
-243:                addEffectAtPlayhead("ramp", "white", { duration: 0.6, fxSound: "riser" });
-246:                addEffectAtPlayhead("freeze", "white", { duration: 0.6, fxSound: "camera_click" });
-5230:    function addEffectAtPlayhead(kind, color, overrides) {
-```
-
-#### editor.js clock / master
-```
-```
-
-#### editor.js video base clip helpers (sourceOffset mapping)
-```
-91:    function firstVideoTrackId() {
-```
-
-#### editor.js tail from Studio Integrations
-```
-    // ── Studio Integrations (§2 & §6 Moments / Templates / Seek / Transcript) ──
-    window.studioSeek = seekTo;
-
-    Object.defineProperty(window, "studioTranscriptWords", {
-        get() {
-            if (state._lastTranscribe && Array.isArray(state._lastTranscribe.words) && state._lastTranscribe.words.length) {
-                return state._lastTranscribe.words;
-            }
-            const tId = textTrackId();
-            const clips = state.tracks[tId] || [];
-            const words = [];
-            for (const c of clips) {
-                if (Array.isArray(c.words)) words.push(...c.words);
-            }
-            return words.length ? words : null;
-        },
-        configurable: true
-    });
-
-    window.studioAddFx = function(fxList, baseTime = 0) {
-        if (!Array.isArray(fxList) || !fxList.length) return;
-        const tid = ensureFxTrack();
-        ensureTracksInitialized();
-        for (const f of fxList) {
-            const start = baseTime + (f.start || 0);
-            const dur = Math.max(0.05, (f.end != null ? (f.end - f.start) : (f.duration || 0.35)));
-            const c = {
-                id: "fx_" + Math.random().toString(36).slice(2, 9),
-                trackId: tid,
-                startTime: Math.max(0, start),
-                duration: dur,
-                sourceOffset: 0,
-                sourceDuration: dur,
-                title: "",
-                isFx: true,
-                fxKind: f.kind || "flash",
-                fxColor: f.color || "white",
-                fxPeak: f.amp != null ? f.amp : (f.peak != null ? f.peak : 0.75),
-                fxSound: f.sfx || f.fxSound || "none",
-                fxGain: 1.0,
-                fxBarH: 160,
-                fxAmp: (f.amp ? Math.round(f.amp * 100) : 12),
-                fxFreq: 7,
-                media: null,
-                volume: 1.0,
-                opacity: 1.0
-            };
-            if (f.anchor) c.anchor = f.anchor;
-            c.title = fxLabel(c);
-            (state.tracks[tid] = state.tracks[tid] || []).push(c);
-        }
-        state.tracks[tid].sort((a, b) => a.startTime - b.startTime);
+        const fxTid = tidOfFx();
+        if (state.tracks[fxTid]) state.tracks[fxTid].sort((a, b) => a.startTime - b.startTime);
         recalcTotalDuration();
         renderTimeline();
+        syncVideoToCurrentTime();
         saveProject();
+        return added;
     };
 
     document.addEventListener("studio:template-plan", (e) => {
         const plan = e.detail;
         if (plan && Array.isArray(plan.fx) && plan.fx.length) {
             const base = (plan.moment && typeof plan.moment.start === "number") ? plan.moment.start : state.currentTime;
-            window.studioAddFx(plan.fx, base);
-            showToast(`Шаблон «${plan.template || ""}»: добавлено ${plan.fx.length} эффектов на таймлайн`, "ok");
+            const added = window.studioAddFx(plan.fx, base, { timeBase: "source" });  // studio:addfx-source
+            if (added) showToast(`Шаблон «${plan.template || ""}»: добавлено ${added} эффектов на таймлайн`, "ok");
         }
     });
 
@@ -508,307 +383,76 @@ overlay_export selftest: OK
 
 ```
 
-#### server.py __main__ to EOF
+#### editor.js flash hotkey
+```
+225:                addEffectAtPlayhead("flash", col, { duration: 0.18, peak: 0.95, fxPeak: 0.95, fxSound: "impact_epic" });  // studio:flash-fxpeak
+```
+
+#### editor.js addFxClip head
+```
+    function addFxClip(kind, color) {
+        const tid = ensureFxTrack();
+        ensureTracksInitialized();
+        const fxKind = kind || "flash";
+        const fxColor = fxKind === "flash" ? (color || "white") : (color || "white");
+        const dur = fxKind === "flash" ? 0.6 : (fxKind === "bars" ? 1.8 : 1.2);
+        const c = {
+            id: "fx_" + Date.now().toString(36),
+            trackId: tid,
+            startTime: Math.max(0, state.currentTime),
+            duration: dur,
+            sourceOffset: 0,
+            sourceDuration: dur,
+            title: "",
+            isFx: true,
+            fxKind,
+            fxColor,
+            fxPeak: 0.75,
+            fxSound: fxKind === "flash" ? (FX_DEFAULT_SOUND[fxColor] || "click") : "whoosh",
+            fxGain: 1.0,
+            fxBarH: 160,
+            fxAmp: 12,
+            fxFreq: 7,
+            media: null,
+            volume: 1.0,
+            opacity: 1.0
+        };
+        c.title = fxLabel(c);
+        (state.tracks[tid] = state.tracks[tid] || []).push(c);
+        state.tracks[tid].sort((a, b) => a.startTime - b.startTime);
+        selectClip(c.id);
+        recalcTotalDuration();
+        renderTimeline();
+        saveProject();
+        switchTab("inspector");
+    }
+    // «+Текст»: свободный текстовый элемент (не субтитры) с полными параметрами;
+    // живёт на текстовом слое, но его можно перетащить на любой другой слой
+    function addTextClip() {
+        ensureTracksInitialized();
+        let tid = textTrackId();
+```
+
+#### server.py check_disk
+```
+def check_disk(req: CheckDiskRequest):
+    """
+    Check if disk has enough free space for the requested size.
+    Returns status, shortage, and clear messages if space is insufficient.
+    """
+    return disk_manager.check_space(req.required_bytes, peak_factor=_studio.DOWNLOAD_PEAK_FACTOR)  # studio:check-disk-peak
+
+@app.post("/api/probe")
+```
+
+#### server.py __main__
 ```
 if __name__ == "__main__":
-    run_server()
-```
-
-#### server.py _two_pass_loudnorm
-```
-3273:def _two_pass_loudnorm(src_wav: str, dst_wav: str, target_i: float = -14.0,
-3742:            if not _two_pass_loudnorm(wav_raw, wav_norm):
-def _two_pass_loudnorm(src_wav: str, dst_wav: str, target_i: float = -14.0,
-                       target_tp: float = -1.0, target_lra: float = 11.0) -> bool:
-    """0b: two-pass loudnorm (measure then apply linearly) + true-peak limiter."""
-    try:
-        p1 = ["ffmpeg", "-y", "-loglevel", "info", "-i", src_wav,
-              "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json",
-              "-f", "null", "-"]
-        r1 = subprocess.run(p1, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=600)
-        measured = {}
-        if r1.stderr:
-            start = r1.stderr.rfind("{")
-            end = r1.stderr.rfind("}")
-            if start >= 0 and end > start:
-                try:
-                    measured = json.loads(r1.stderr[start:end + 1])
-                except Exception:
-                    measured = {}
-        if {"measured_I", "measured_TP", "measured_LRA", "measured_thresh"}.issubset(measured.keys()):
-            af = (f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
-                  f":measured_I={measured['measured_I']}:measured_TP={measured['measured_TP']}"
-                  f":measured_LRA={measured['measured_LRA']}:measured_thresh={measured['measured_thresh']}"
-                  f":offset={measured.get('target_offset', 0.0) or 0.0}:linear=true,"
-                  "alimiter=limit=0.891:attack=5:release=50")
-        else:
-            af = (f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra},"
-                  "alimiter=limit=0.891:attack=5:release=50")
-        p2 = ["ffmpeg", "-y", "-loglevel", "error", "-i", src_wav, "-af", af,
-              "-ar", "48000", "-c:a", "pcm_s16le", dst_wav]
-        r2 = subprocess.run(p2, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=600)
-        return r2.returncode == 0 and os.path.exists(dst_wav) and os.path.getsize(dst_wav) > 44
-    except Exception:
-        return False
-
-
-def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: str, idx: int) -> Optional[Dict[str, Any]]:
-    """Layered compositing export: every timeline video/image element renders
-    in z-order (bottom first), FX elements apply at their track level only
-    (an FX under an upper layer never touches it), then grade, static frames,
-    subtitles and free text on top. Mirrors the on-canvas preview."""
-    layers = [L for L in (clip.layers or []) if L.source_file]
-    if not layers:
-        return None
-    # resolve files
-    for L in layers:
-        p0 = os.path.join(DOWNLOADS_DIR, os.path.basename(L.source_file))
-        if not os.path.exists(p0) and os.path.exists(L.source_file):
-```
-
-#### server.py loudnorm occurrences
-```
-3273:def _two_pass_loudnorm(src_wav: str, dst_wav: str, target_i: float = -14.0,
-3275:    """0b: two-pass loudnorm (measure then apply linearly) + true-peak limiter."""
-3278:              "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json",
-3291:            af = (f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
-3297:            af = (f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra},"
-3666:    # ── audio: built in a SEPARATE pass into WAV, then two-pass loudnorm (0b) ──
-3742:            if not _two_pass_loudnorm(wav_raw, wav_norm):
-4306:                "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
-4310:            filter_parts.append("".join(audio_seg_labels) + f"concat=n={n_seg}:v=0:a=1,loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
-4314:                filter_parts.append("[0:a]loudnorm=I=-14:TP=-1.0:LRA=11,alimiter=limit=-1.0dB:attack=5:release=50[aout]")
-```
-
-#### server.py export_clip_pack audio block
-```
-                    n_inputs = new_n
-                mix_labels.append(f"[sfx{qi}]")
-            # timeline audio files (music / SFX from layers)
-            for ai, au in enumerate(clip.extra_audio or []):
-                try:
-                    apath = os.path.join(DOWNLOADS_DIR, os.path.basename(au.filename))
-                    if not os.path.exists(apath):
-                        continue
-                    gain = max(0.0, min(3.0, float(au.gain if au.gain is not None else 1.0)))
-                    off = max(0.0, float(au.src_offset or 0.0))
-                    dur = max(0.2, float(au.duration or 5.0))
-                    place = int(max(0.0, float(au.out_start or 0.0)) * 1000)
-                except (TypeError, ValueError):
-                    continue
-                ain = n_inputs
-                in_args = ["-ss", str(off), "-t", str(dur)]
-                if au.loop:
-                    in_args = ["-stream_loop", "-1", "-ss", str(off), "-t", str(dur)]
-                inputs.extend(in_args + ["-i", apath])
-                n_inputs += 1
-                mtag = f"mx{ai}"
-                filter_parts.append(
-                    f"[{ain}:a]aresample=48000,aformat=channel_layouts=stereo,"
-                    f"volume={gain},adelay={place}|{place}[{mtag}raw]"
-                )
-                if au.duck:
-                    # music ducks under the voice; [amain] is split so the mix
-                    # still receives a copy (a stream can only be consumed once)
-                    if not _duck_split_done:
-                        _duck_split_done = True
-                        filter_parts.append("[amain]asplit=2[amaindk]amain")
-                        filter_parts.append(
-                            f"[{mtag}raw][amaindk]sidechaincompress=threshold=0.02:ratio=9:"
-                            f"attack=15:release=450:makeup=1[{mtag}]"
-                        )
-                    else:
-                        filter_parts.append(f"[{mtag}raw]volume=0.55[{mtag}]")
-                else:
-                    filter_parts.append(f"[{mtag}raw]anull[{mtag}]")
-                mix_labels.append(f"[{mtag}]")
-            filter_parts.append(
-                "".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
-            )
-            audio_map = "[aout]"
-        elif n_seg > 1:
-            filter_parts.append("".join(audio_seg_labels) + f"concat=n={n_seg}:v=0:a=1,loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
-            audio_map = "[aout]"
-        else:
-            if _source_has_audio(source_path):
-                filter_parts.append("[0:a]loudnorm=I=-14:TP=-1.0:LRA=11,alimiter=limit=-1.0dB:attack=5:release=50[aout]")
-            else:
-                filter_parts.append(f"anullsrc=r=48000:cl=stereo:d={total_dur:.3f}[aout]")
-            audio_map = "[aout]"
-
-        # Construct full FFmpeg command
-        filter_complex_str = ";".join(filter_parts)
-        ffmpeg_cmd = ["ffmpeg", "-y"] + inputs + [
-            "-filter_complex", filter_complex_str,
-            "-map", curr_v,
-            "-map", audio_map,
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "15",
-            "-tune", "film",
-            "-x264-params", "aq-mode=3:aq-strength=0.9:deblock=-1,-1",
-            "-g", "60",
-            "-bf", "3",
-            "-pix_fmt", "yuv420p",
-            "-colorspace", "bt709",
-            "-color_primaries", "bt709",
-            "-color_trc", "bt709",
-            "-color_range", "tv",
-            "-c:a", "aac",
-            "-b:a", "256k",
-            "-ar", "48000",
-            "-movflags", "+faststart",
-            out_path
-        ]
-
-        try:
-            ffmpeg_env = os.environ.copy()
-            if "FONTCONFIG_PATH" not in ffmpeg_env and sys.platform == "win32":
-                ffmpeg_env["FONTCONFIG_PATH"] = FONTS_DIR
-
-            render_res = subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=600, env=ffmpeg_env)
-            if render_res.returncode == 0 and os.path.exists(out_path):
-```
-
-#### server.py -ss usages
-```
-287:                "-ss", str(round(req.trim_offset, 3)),
-472:            "ffmpeg", "-y", "-ss", "00:00:01", "-i", video_path,
-968:    cmd = ["ffmpeg", "-y", "-ss", str(max(0.0, start))]
-1138:                cmd = ["ffmpeg", "-y", "-ss", f"{cpos:.3f}", "-t", f"{cdur:.3f}", "-i", temp_audio,
-1296:    cmd = ["ffmpeg", "-loglevel", "error", "-ss", f"{max(0.0, t_from):.3f}",
-1722:    cmd = ["ffmpeg", "-loglevel", "error", "-ss", str(max(0.0, req.start))]
-3380:        inputs.extend(["-ss", f"{max(0.0, L.src_offset):.3f}", "-t", f"{max(0.2, L.duration or total_dur):.3f}", "-i", L.source_file])
-3696:        in_args = ["-ss", str(off), "-t", str(dur)]
-3698:            in_args = ["-stream_loop", "-1", "-ss", str(off), "-t", str(dur)]
-3961:            inputs.extend(["-ss", str(seg_start), "-t", str(seg_lens[si]), "-i", source_path])
-4190:                inputs.extend(["-ss", str(clip.start_time), "-t", str(total_dur), "-i", ovl_path])
-4280:                in_args = ["-ss", str(off), "-t", str(dur)]
-4282:                    in_args = ["-stream_loop", "-1", "-ss", str(off), "-t", str(dur)]
-4402:        inputs: List[str] = ["-ss", f"{max(0.0, src_time):.3f}", "-i", base_src]
-```
-
-#### server.py _export_layered_clip head
-```
-def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: str, idx: int) -> Optional[Dict[str, Any]]:
-    """Layered compositing export: every timeline video/image element renders
-    in z-order (bottom first), FX elements apply at their track level only
-    (an FX under an upper layer never touches it), then grade, static frames,
-    subtitles and free text on top. Mirrors the on-canvas preview."""
-    layers = [L for L in (clip.layers or []) if L.source_file]
-    if not layers:
-        return None
-    # resolve files
-    for L in layers:
-        p0 = os.path.join(DOWNLOADS_DIR, os.path.basename(L.source_file))
-        if not os.path.exists(p0) and os.path.exists(L.source_file):
-            p0 = L.source_file
-        L.source_file = p0
-    layers = [L for L in layers if os.path.exists(L.source_file)]
-    if not layers:
-        return None
-    # clamp in-points against the real source length: a layer beyond EOF
-    # would silently render as an empty input
-    for L in layers:
-        d = _probe_duration(L.source_file)
-        if d and L.src_offset > d - 0.2:
-            L.src_offset = max(0.0, d - max(0.2, float(L.duration or 1.0)))
-    layers.sort(key=lambda L: -L.z)          # deepest (highest z) first
-    base = layers[0]
-
-    tv = clip.color_grade == "tv" and not clip.src_processed
-    fmt = "talking_head_9_16" if clip.src_processed else clip.format
-    if clip.format == "cinematic_16_9":
-        out_w, out_h = (1920, 1080)
+    # studio:main-secure - hardened server (127.0.0.1 + token + Host/Origin checks +
+    # export pipeline). The old unprotected server: KICK_LEGACY_SERVER=1 python server.py
+    if os.environ.get("KICK_LEGACY_SERVER") == "1":
+        run_server()
     else:
-```
-
-#### server.py defs
-```
-156:class CheckDiskRequest(BaseModel):
-183:def check_disk(req: CheckDiskRequest):
-1977:class ExportClipItem(BaseModel):
-3017:def _source_has_audio(path: str) -> bool:
-3029:def _tv_grade_parts(src: str, dst: str, is_vertical: bool = True) -> List[str]:
-3307:def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: str, idx: int) -> Optional[Dict[str, Any]]:
-3848:def export_clip_pack(req: ExportPackRequest):
-```
-
-#### server.py export_clip_pack inputs
-```
-3957:        n_inputs = 0
-3961:            inputs.extend(["-ss", str(seg_start), "-t", str(seg_lens[si]), "-i", source_path])
-3963:            n_inputs += 1
-4053:            inputs.extend(["-stream_loop", "-1", "-t", str(total_dur), "-i", bg_path])
-4055:            n_inputs += 1
-4188:                inputs.extend(["-loop", "1", "-framerate", "30", "-t", str(total_dur), "-i", ovl_path])
-4190:                inputs.extend(["-ss", str(clip.start_time), "-t", str(total_dur), "-i", ovl_path])
-4191:            n_inputs += 1
-4265:                    n_inputs = new_n
-4283:                inputs.extend(in_args + ["-i", apath])
-4284:                n_inputs += 1
-4403:        n_inputs = 1
-```
-
-#### disk_manager.check_space signature
-```
-79:    def check_space(
-80-        self,
-81-        required_bytes: int,
-82-        path: Optional[str] = None,
-83-        peak_factor: float = 1.0,
-84-        safety_ratio: float = SAFETY_RATIO,
-85-        already_present_bytes: int = 0,
-```
-
-#### studio/loader.py
-```
-"""Load server.py with the anchored audit fixes applied and register it as
-the `server` module (so verify_all.py / tests / studio_server.py get the
-fixed code). After `python -m studio.patching --write` it is a plain import.
-"""
-from __future__ import annotations
-
-import importlib.util
-import os
-import sys
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-
-from studio.patching import apply_patches, read_source, summarize  # noqa: E402
-from studio.server_patches import SERVER_PATCHES  # noqa: E402
-
-REPORT = []
-
-
-def load_server():
-    mod = sys.modules.get("server")
-    if mod is not None and getattr(mod, "_STUDIO_PATCHED", False):
-        return mod
-    path = os.path.join(BASE_DIR, "server.py")
-    src, _bom = read_source(path)
-    patched, results = apply_patches(src, SERVER_PATCHES, "server.py")
-    REPORT[:] = results
-    spec = importlib.util.spec_from_file_location("server", path)
-    mod = importlib.util.module_from_spec(spec)
-    mod.__file__ = path
-    mod._STUDIO_PATCH_REPORT = [r.as_dict() for r in results]
-    sys.modules["server"] = mod
-    try:
-        exec(compile(patched, path, "exec"), mod.__dict__)
-    except BaseException:
-        sys.modules.pop("server", None)
-        raise
-    mod._STUDIO_PATCHED = True
-    failed = [r for r in results if r.status == "failed"]
-    msg = f"[studio] server.py patches: {summarize(results)}"
-    if failed:
-        msg += " FAILED: " + ", ".join(f"{r.id} ({r.detail})" for r in failed)
-    print(msg, flush=True)
-    return mod
-
-
-server = load_server()
+        import studio_server
+        sys.exit(studio_server.main())
 ```

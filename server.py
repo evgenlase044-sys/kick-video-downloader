@@ -185,7 +185,7 @@ def check_disk(req: CheckDiskRequest):
     Check if disk has enough free space for the requested size.
     Returns status, shortage, and clear messages if space is insufficient.
     """
-    return disk_manager.check_space(req.required_bytes)
+    return disk_manager.check_space(req.required_bytes, peak_factor=_studio.DOWNLOAD_PEAK_FACTOR)  # studio:check-disk-peak
 
 @app.post("/api/probe")
 def probe_video(req: ProbeRequest):
@@ -4565,4 +4565,10 @@ def run_server(host: str = "127.0.0.1", port: int = 8765):
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 if __name__ == "__main__":
-    run_server()
+    # studio:main-secure - hardened server (127.0.0.1 + token + Host/Origin checks +
+    # export pipeline). The old unprotected server: KICK_LEGACY_SERVER=1 python server.py
+    if os.environ.get("KICK_LEGACY_SERVER") == "1":
+        run_server()
+    else:
+        import studio_server
+        sys.exit(studio_server.main())
