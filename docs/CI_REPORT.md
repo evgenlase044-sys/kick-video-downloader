@@ -67,7 +67,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T10:00:03Z, 8721852)
+# CI report (2026-09-28T10:04:45Z, 4489a58)
 
 ### ✅ python compile
 ```
@@ -145,15 +145,15 @@ ok
 test_slug_validation (studio.tests.test_pr10.ChatRecorderTest.test_slug_validation) ... ok
 test_aes128_slice_keeps_sequence_iv (studio.tests.test_pr10.HlsDownloadE2ETest.test_aes128_slice_keeps_sequence_iv)
 Sliced list starting at segment 2: IV must stay = original media sequence. ... ok
-test_aes128_ts (studio.tests.test_pr10.HlsDownloadE2ETest.test_aes128_ts) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:218: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpsydc2a9p/aes.m3u8' mode='r' encoding='UTF-8'>
+test_aes128_ts (studio.tests.test_pr10.HlsDownloadE2ETest.test_aes128_ts) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:218: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpqjuatd5_/aes.m3u8' mode='r' encoding='UTF-8'>
   self.assertIn("METHOD=AES-128", open(os.path.join(self.root, "aes.m3u8")).read())
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
-test_byterange_single_file (studio.tests.test_pr10.HlsDownloadE2ETest.test_byterange_single_file) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:247: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmp921c39xg/b.m3u8' mode='r' encoding='UTF-8'>
+test_byterange_single_file (studio.tests.test_pr10.HlsDownloadE2ETest.test_byterange_single_file) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:247: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpcjgn4q2d/b.m3u8' mode='r' encoding='UTF-8'>
   text = open(os.path.join(self.root, "b.m3u8")).read()
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
-test_fmp4 (studio.tests.test_pr10.HlsDownloadE2ETest.test_fmp4) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:239: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpiwuh875f/f.m3u8' mode='r' encoding='UTF-8'>
+test_fmp4 (studio.tests.test_pr10.HlsDownloadE2ETest.test_fmp4) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:239: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpz0ss3ovx/f.m3u8' mode='r' encoding='UTF-8'>
   self.assertIn("#EXT-X-MAP", open(os.path.join(self.root, "f.m3u8")).read())
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
@@ -197,7 +197,7 @@ test_lens_parts_have_overscan_and_no_rgbashift (studio.tests.test_pr9.Pr9FxTest.
 test_split_top_h (studio.tests.test_pr9.Pr9FxTest.test_split_top_h) ... ok
 
 ----------------------------------------------------------------------
-Ran 71 tests in 17.148s
+Ran 71 tests in 15.126s
 
 OK
 ```
