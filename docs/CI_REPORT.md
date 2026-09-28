@@ -31,13 +31,18 @@ server.py: {'already': 27, 'skipped': 1}
   already  version-mtime                marker present
   already  main-secure                  marker present
 
-web/editor.js: {'already': 6}
+web/editor.js: {'already': 6, 'applied': 4}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
   already  addfx-v2                     marker present
   already  addfx-source                 marker present
+  applied  addfx-count                  1x
+  applied  addfx-fxtrack                1x
+  applied  fx-add-identity              replaced 675 chars
+  applied  fx-unique-id                 1x
   already  flash-fxpeak                 marker present
+  -> written web/editor.js
 
 web/index.html: {'skipped': 2, 'already': 3}
   skipped  drop-dead-exporter           guard declined
@@ -47,7 +52,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T05:30:01Z, f41e3b1)
+# CI report (2026-09-28T05:33:54Z, c5c10d8)
 
 ### ✅ python compile
 ```
@@ -87,12 +92,16 @@ server.py: {'already': 27, 'skipped': 1}
   already  version-mtime                marker present
   already  main-secure                  marker present
 
-web/editor.js: {'already': 6}
+web/editor.js: {'already': 10}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
   already  addfx-v2                     marker present
   already  addfx-source                 marker present
+  already  addfx-count                  marker present
+  already  addfx-fxtrack                marker present
+  already  fx-add-identity              marker present
+  already  fx-unique-id                 marker present
   already  flash-fxpeak                 marker present
 
 web/index.html: {'skipped': 2, 'already': 3}
@@ -126,9 +135,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x560401927680] Impossible to open '/tmp/tmp8ejhraht/ovjob/000000.png'
-[in#1 @ 0x56040191cdc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmp8ejhraht/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5579859e8680] Impossible to open '/tmp/tmps0zzju9x/ovjob/000000.png'
+[in#1 @ 0x5579859dddc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmps0zzju9x/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -147,7 +156,7 @@ test_gl_lens_shader_has_no_debug_output (studio.tests.test_pr7.Pr7PatchesTest.te
 test_server_patches (studio.tests.test_pr7.Pr7PatchesTest.test_server_patches) ... ok
 
 ----------------------------------------------------------------------
-Ran 35 tests in 9.262s
+Ran 35 tests in 10.101s
 
 OK
 ```
@@ -288,161 +297,41 @@ overlay_export selftest: OK
 
 ## Probe
 
-#### editor.js from studio:addfx-v2 to EOF
+#### editor.js addEffectAtPlayhead
 ```
-    // studio:addfx-v2 - template/moment fx go through the SAME builder as the
-    // hotkeys (addEffectAtPlayhead): per-kind fields (zoom/lens/threshold/flash
-    // -> fxPeak, shake -> fxAmp/fxFreq), anchor for the face zoom, and the
-    // moment's SOURCE time is mapped onto the timeline via the clip showing it.
-    function studioSourceToTimeline(srcT) {
-        let best = null;
-        const ids = (typeof videoTrackIds === "function") ? videoTrackIds() : [];
-        for (const tid of ids) {
-            for (const c of (state.tracks[tid] || [])) {
-                if (!c || !c.media || c.isFx) continue;
-                const off = Number(c.sourceOffset) || 0;
-                const rate = Number(c.speed) > 0 ? Number(c.speed) : 1;
-                const srcLen = (Number(c.duration) || 0) * rate;
-                if (srcT >= off && srcT < off + srcLen) {
-                    const t = c.startTime + (srcT - off) / rate;
-                    if (best === null || t < best) best = t;
-                }
-            }
+    function addEffectAtPlayhead(kind, color, overrides) {
+        // studio:fx-add-identity - the new clip is found by identity on the SAME
+        // track addFxClip() writes to; returns the clip (or null).
+        // §7.3 (W): whip ставится на ближайший рез (граница нарезки/клипа)
+        if (overrides && overrides.snapToCut) {
+            const cut = nearestCutTo(state.currentTime);
+            if (cut != null) seekTo(cut);
         }
-        return best;
-    }
-    window.studioSourceToTimeline = studioSourceToTimeline;
-
-    window.studioAddFx = function (fxList, baseTime, opts) {
-        if (!Array.isArray(fxList) || !fxList.length) return 0;
-        const o = opts || {};
-        let base = Number(baseTime) || 0;
-        if (o.timeBase === "source") {
-            const mapped = studioSourceToTimeline(base);
-            if (mapped === null) {
-                showToast("Момент не попадает ни в один клип на таймлайне: эффекты не добавлены", "info");
-                return 0;
-            }
-            base = mapped;
-        }
-        const savedTime = state.currentTime;
-        let added = 0;
-        try {
-            for (const f of fxList) {
-                if (!f || !f.kind) continue;
-                const kind = String(f.kind);
-                const s = Number(f.start) || 0;
-                const dur = Math.max(0.05, f.end != null ? (Number(f.end) - s) : (Number(f.duration) || 0.35));
-                const ov = { duration: dur, fxSound: f.sfx || f.fxSound || "none" };
-                if (kind === "zoom") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.15;
-                else if (kind === "lens") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.18;
-                else if (kind === "threshold") ov.fxPeak = f.amp != null ? Number(f.amp) : 0.45;
-                else if (kind === "flash") ov.fxPeak = f.peak != null ? Number(f.peak) : 0.75;
-                else if (kind === "shake") {
-                    ov.fxAmp = f.amp != null ? Number(f.amp) : 12;
-                    if (f.freq != null) ov.fxFreq = Number(f.freq);
-                }
-                if (f.anchor) ov.anchor = f.anchor;
-                const before = (state.tracks[tidOfFx()] || []).length;
-                state.currentTime = Math.max(0, base + s);
-                addEffectAtPlayhead(kind, f.color || "white", ov);
-                if ((state.tracks[tidOfFx()] || []).length > before) added++;
-            }
-        } finally {
-            state.currentTime = savedTime;
-        }
-        const fxTid = tidOfFx();
-        if (state.tracks[fxTid]) state.tracks[fxTid].sort((a, b) => a.startTime - b.startTime);
-        recalcTotalDuration();
-        renderTimeline();
-        syncVideoToCurrentTime();
-        saveProject();
-        return added;
-    };
-
-    document.addEventListener("studio:template-plan", (e) => {
-        const plan = e.detail;
-        if (plan && Array.isArray(plan.fx) && plan.fx.length) {
-            const base = (plan.moment && typeof plan.moment.start === "number") ? plan.moment.start : state.currentTime;
-            const added = window.studioAddFx(plan.fx, base, { timeBase: "source" });  // studio:addfx-source
-            if (added) showToast(`Шаблон «${plan.template || ""}»: добавлено ${added} эффектов на таймлайн`, "ok");
-        }
-    });
-
-})();
-
-```
-
-#### editor.js flash hotkey
-```
-225:                addEffectAtPlayhead("flash", col, { duration: 0.18, peak: 0.95, fxPeak: 0.95, fxSound: "impact_epic" });  // studio:flash-fxpeak
-```
-
-#### editor.js addFxClip head
-```
-    function addFxClip(kind, color) {
         const tid = ensureFxTrack();
-        ensureTracksInitialized();
-        const fxKind = kind || "flash";
-        const fxColor = fxKind === "flash" ? (color || "white") : (color || "white");
-        const dur = fxKind === "flash" ? 0.6 : (fxKind === "bars" ? 1.8 : 1.2);
-        const c = {
-            id: "fx_" + Date.now().toString(36),
-            trackId: tid,
-            startTime: Math.max(0, state.currentTime),
-            duration: dur,
-            sourceOffset: 0,
-            sourceDuration: dur,
-            title: "",
-            isFx: true,
-            fxKind,
-            fxColor,
-            fxPeak: 0.75,
-            fxSound: fxKind === "flash" ? (FX_DEFAULT_SOUND[fxColor] || "click") : "whoosh",
-            fxGain: 1.0,
-            fxBarH: 160,
-            fxAmp: 12,
-            fxFreq: 7,
-            media: null,
-            volume: 1.0,
-            opacity: 1.0
-        };
-        c.title = fxLabel(c);
-        (state.tracks[tid] = state.tracks[tid] || []).push(c);
-        state.tracks[tid].sort((a, b) => a.startTime - b.startTime);
-        selectClip(c.id);
-        recalcTotalDuration();
+        const before = new Set(state.tracks[tid] || []);
+        addFxClip(kind, color);
+        const c = (state.tracks[tid] || []).find(x => !before.has(x));
+        if (!c) return null;
+        if (c.isFx && overrides) {
+            const ov = Object.assign({}, overrides);
+            delete ov.snapToCut;
+            Object.assign(c, ov);
+            c.sourceDuration = c.duration;
+            c.title = fxLabel(c);
+        }
         renderTimeline();
         saveProject();
-        switchTab("inspector");
+        return c;
     }
-    // «+Текст»: свободный текстовый элемент (не субтитры) с полными параметрами;
-    // живёт на текстовом слое, но его можно перетащить на любой другой слой
-    function addTextClip() {
-        ensureTracksInitialized();
-        let tid = textTrackId();
+    function nearestCutTo(t) {
+        const cuts = [];
+        for (const r of sortedRegions()) {
 ```
 
-#### server.py check_disk
+#### editor.js fx ids + studioAddFx loop
 ```
-def check_disk(req: CheckDiskRequest):
-    """
-    Check if disk has enough free space for the requested size.
-    Returns status, shortage, and clear messages if space is insufficient.
-    """
-    return disk_manager.check_space(req.required_bytes, peak_factor=_studio.DOWNLOAD_PEAK_FACTOR)  # studio:check-disk-peak
-
-@app.post("/api/probe")
-```
-
-#### server.py __main__
-```
-if __name__ == "__main__":
-    # studio:main-secure - hardened server (127.0.0.1 + token + Host/Origin checks +
-    # export pipeline). The old unprotected server: KICK_LEGACY_SERVER=1 python server.py
-    if os.environ.get("KICK_LEGACY_SERVER") == "1":
-        run_server()
-    else:
-        import studio_server
-        sys.exit(studio_server.main())
+5272:    function tidOfFx() {
+5358:            id: "fx_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),  // studio:fx-unique-id
+6201:                if (addEffectAtPlayhead(kind, f.color || "white", ov)) added++;  // studio:addfx-count
+6206:        const fxTid = ensureFxTrack();  // studio:addfx-fxtrack
 ```

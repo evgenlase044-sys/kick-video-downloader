@@ -5228,20 +5228,28 @@
     // §7.3: «эффект в точке плейхеда» одной клавишей, с дефолтными параметрами
     // и дефолтным SFX. Переходный путь поддерживает flash / bars / shake (§15).
     function addEffectAtPlayhead(kind, color, overrides) {
+        // studio:fx-add-identity - the new clip is found by identity on the SAME
+        // track addFxClip() writes to; returns the clip (or null).
         // §7.3 (W): whip ставится на ближайший рез (граница нарезки/клипа)
         if (overrides && overrides.snapToCut) {
             const cut = nearestCutTo(state.currentTime);
             if (cut != null) seekTo(cut);
         }
-        const before = (state.tracks[tidOfFx()] || []).length;
+        const tid = ensureFxTrack();
+        const before = new Set(state.tracks[tid] || []);
         addFxClip(kind, color);
-        const tid = tidOfFx();
-        const clips = state.tracks[tid] || [];
-        if (clips.length === before) return;
-        const c = clips[clips.length - 1];
-        if (c && c.isFx && overrides) Object.assign(c, overrides);
+        const c = (state.tracks[tid] || []).find(x => !before.has(x));
+        if (!c) return null;
+        if (c.isFx && overrides) {
+            const ov = Object.assign({}, overrides);
+            delete ov.snapToCut;
+            Object.assign(c, ov);
+            c.sourceDuration = c.duration;
+            c.title = fxLabel(c);
+        }
         renderTimeline();
         saveProject();
+        return c;
     }
     function nearestCutTo(t) {
         const cuts = [];
@@ -5347,7 +5355,7 @@
         const fxColor = fxKind === "flash" ? (color || "white") : (color || "white");
         const dur = fxKind === "flash" ? 0.6 : (fxKind === "bars" ? 1.8 : 1.2);
         const c = {
-            id: "fx_" + Date.now().toString(36),
+            id: "fx_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),  // studio:fx-unique-id
             trackId: tid,
             startTime: Math.max(0, state.currentTime),
             duration: dur,
@@ -6189,15 +6197,13 @@
                     if (f.freq != null) ov.fxFreq = Number(f.freq);
                 }
                 if (f.anchor) ov.anchor = f.anchor;
-                const before = (state.tracks[tidOfFx()] || []).length;
                 state.currentTime = Math.max(0, base + s);
-                addEffectAtPlayhead(kind, f.color || "white", ov);
-                if ((state.tracks[tidOfFx()] || []).length > before) added++;
+                if (addEffectAtPlayhead(kind, f.color || "white", ov)) added++;  // studio:addfx-count
             }
         } finally {
             state.currentTime = savedTime;
         }
-        const fxTid = tidOfFx();
+        const fxTid = ensureFxTrack();  // studio:addfx-fxtrack
         if (state.tracks[fxTid]) state.tracks[fxTid].sort((a, b) => a.startTime - b.startTime);
         recalcTotalDuration();
         renderTimeline();
