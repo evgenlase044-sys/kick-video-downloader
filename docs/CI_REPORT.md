@@ -61,7 +61,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T08:03:28Z, 073e733)
+# CI report (2026-09-28T08:23:19Z, 8dd38a3)
 
 ### ✅ python compile
 ```
@@ -154,9 +154,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5634de319680] Impossible to open '/tmp/tmp39kyott_/ovjob/000000.png'
-[in#1 @ 0x5634de30edc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmp39kyott_/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5624a53a8680] Impossible to open '/tmp/tmpbi3vx0c8/ovjob/000000.png'
+[in#1 @ 0x5624a539ddc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmpbi3vx0c8/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -186,7 +186,7 @@ test_zoom_anchor_moves_the_punch (studio.tests.test_pr8.Pr8ExportFxTest.test_zoo
 test_zoom_really_zooms_only_inside_its_window (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_really_zooms_only_inside_its_window) ... ok
 
 ----------------------------------------------------------------------
-Ran 45 tests in 10.597s
+Ran 45 tests in 11.247s
 
 OK
 ```
