@@ -1,5 +1,5 @@
 """Install the studio layer into server.app: security middleware, patched
-web files (editor.js / index.html), and /api/studio/status."""
+web files (editor.js / index.html), /api/studio/status, moments + templates."""
 from __future__ import annotations
 
 import os
@@ -34,7 +34,8 @@ class _PatchedFile:
             return self._text
 
 
-def install(app, *, token, port, web_dir, sfx_dir, allowed_hosts=("127.0.0.1", "localhost", "::1"), server_report=None):
+def install(app, *, token, port, web_dir, sfx_dir, allowed_hosts=("127.0.0.1", "localhost", "::1"),
+            server_report=None, downloads_dir=None):
     index = _PatchedFile(os.path.join(web_dir, "index.html"), INDEX_PATCHES, "web/index.html")
     editor = _PatchedFile(os.path.join(web_dir, "editor.js"), EDITOR_PATCHES, "web/editor.js")
     editor_paths = {"/editor.js"}
@@ -57,16 +58,17 @@ def install(app, *, token, port, web_dir, sfx_dir, allowed_hosts=("127.0.0.1", "
         return {"patches": rep, "failed": [f"{k}:{r['id']}" for k, v in rep.items() for r in v
                                            if r["status"] == "failed" and r.get("required", True)]}
 
-    n = 0
+    n_before = len(app.router.routes)
     for p in ("/", "/index.html"):
         app.add_api_route(p, html, methods=["GET"], include_in_schema=False)
-        n += 1
     for p in sorted(editor_paths):
         app.add_api_route(p, editor_js, methods=["GET"], include_in_schema=False)
-        n += 1
     app.add_api_route("/api/studio/status", status, methods=["GET"])
-    n += 1
+    if downloads_dir:
+        from studio.api import build_router
+        app.include_router(build_router(downloads_dir))
     routes = app.router.routes
+    n = len(routes) - n_before
     moved = routes[-n:]
     del routes[-n:]
     routes[0:0] = moved   # before the StaticFiles mount at "/"
