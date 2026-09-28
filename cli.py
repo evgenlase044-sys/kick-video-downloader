@@ -162,9 +162,11 @@ def main():
             break
 
         # Insufficient space: STRICT REQUIREMENT TO DELETE FILES
+        required_with_buffer = int(check['required_bytes'] * 1.05)
+        required_buffer_formatted = format_bytes(required_with_buffer)
         print("\n" + "=" * 76)
         print(f" [!] ВНИМАНИЕ: НЕ ХВАТАЕТ МЕСТА НА ДИСКЕ {check['drive']}!")
-        print(f"     Требуется для видео: {check['required_formatted']} (с запасом 5%: {check['required_safety_formatted']})")
+        print(f"     Требуется для видео: {check['required_formatted']} (с запасом 5%: {required_buffer_formatted})")
         print(f"     Свободно сейчас:    {check['free_formatted']}")
         print(f"     Дефицит места:      {check['shortage_formatted']}")
         print(f"\n     ДЛЯ ПРОДОЛЖЕНИЯ СКАЧИВАНИЯ НЕОБХОДИМО УДАЛИТЬ ФАЙЛЫ")
