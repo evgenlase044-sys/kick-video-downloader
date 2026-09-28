@@ -1,4 +1,4 @@
-﻿// Kick Downloader UI Logic & Studio Integration
+// Kick Downloader UI Logic & Studio Integration
 document.addEventListener("DOMContentLoaded", () => {
     // Header & Disk elements
     const pillDrive = document.getElementById("pillDrive");
@@ -57,11 +57,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusMessage = document.getElementById("statusMessage");
     const cancelDownloadBtn = document.getElementById("cancelDownloadBtn");
 
+    // Same rule as the server (disk_manager.check_space with DOWNLOAD_PEAK_FACTOR):
+    // while the HLS VOD is merged, segments AND the MP4 exist at once (x2),
+    // plus the 5% safety margin promised in the README. Before PR #7 the UI
+    // checked 1x, said "enough", and /api/start-download then refused silently.
+    const DOWNLOAD_PEAK_FACTOR = 2.0;
+    const DISK_SAFETY_RATIO = 0.05;
+
     // State
     let currentVideoData = null;
     let selectedQuality = null;
     let currentDiskInfo = null;
     let eventSource = null;
+    let progressFinished = false;
+    let progressRetryTimer = null;
+    let progressRetryDelay = 1000;
     let dlMode = "full"; // "full" | "fragment"
 
     function parseTimeInput(str) {
@@ -106,6 +116,10 @@ document.addEventListener("DOMContentLoaded", () => {
             if (r) return Math.max(1024, Math.floor(full * ((r.end - r.start) / currentVideoData.duration)));
         }
         return full;
+    }
+
+    function peakNeedBytes(reqBytes) {
+        return Math.ceil(Math.max(0, reqBytes) * DOWNLOAD_PEAK_FACTOR * (1 + DISK_SAFETY_RATIO));
     }
 
     function updateDownloadBtnLabel() {
@@ -255,21 +269,23 @@ document.addEventListener("DOMContentLoaded", () => {
         checkSelectedQualitySpace();
     }
 
-    // Strict Space Checking (Exact size, ZERO extra buffers)
+    // Space check: the SAME rule as the server (peak x2 + 5%), so the button
+    // state never contradicts /api/start-download.
     function checkSelectedQualitySpace() {
         if (!selectedQuality || !currentDiskInfo) return;
 
         updateDownloadBtnLabel();
 
         const reqBytes = getEffectiveRequiredBytes();
+        const needBytes = peakNeedBytes(reqBytes);
         const totalBytes = currentDiskInfo.total_bytes;
         const freeBytes = currentDiskInfo.free_bytes;
         const usedBytes = currentDiskInfo.used_bytes;
 
-        const isEnough = freeBytes >= reqBytes;
-        const shortage = Math.max(0, reqBytes - freeBytes);
+        const isEnough = freeBytes >= needBytes;
+        const shortage = Math.max(0, needBytes - freeBytes);
 
-        // Update Disk Usage Bar
+        // Update Disk Usage Bar (the bar shows the final file; the peak is in the hint)
         const usedPct = (usedBytes / totalBytes) * 100;
         const reqPct = Math.min((reqBytes / totalBytes) * 100, 100 - usedPct);
 
@@ -285,7 +301,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         legendUsedSize.textContent = currentDiskInfo.used_formatted;
-        legendRequiredSize.textContent = selectedQuality.size.formatted_size;
+        legendRequiredSize.textContent = formatBytesJs(reqBytes);
 
         if (isEnough) {
             const remaining = freeBytes - reqBytes;
@@ -293,10 +309,10 @@ document.addEventListener("DOMContentLoaded", () => {
             spaceAlertBox.classList.add("hidden");
             startDownloadBtn.disabled = false;
             startDownloadBtn.style.opacity = "1";
-            startDownloadBtn.title = "Начать скачивание";
+            startDownloadBtn.title = `Начать скачивание (на пике сборки нужно ${formatBytesJs(needBytes)})`;
         } else {
             legendRemainingSize.textContent = "0 B (Недостаточно!)";
-            alertReq.textContent = selectedQuality.size.formatted_size;
+            alertReq.textContent = `${formatBytesJs(reqBytes)} (на пике сборки ${formatBytesJs(needBytes)})`;
             alertFree.textContent = currentDiskInfo.free_formatted;
             alertDrive.textContent = currentDiskInfo.drive;
             alertShortage.textContent = formatBytesJs(shortage);
@@ -311,9 +327,17 @@ document.addEventListener("DOMContentLoaded", () => {
     function formatBytesJs(bytes) {
         if (bytes <= 0) return "0 B";
         const units = ["B", "KB", "MB", "GB", "TB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
         const val = bytes / Math.pow(1024, i);
         return `${val.toFixed(2)} ${units[i]}`;
+    }
+
+    function detailMessage(detail, fallback) {
+        if (!detail) return fallback;
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail)) return detail.map(x => (x && x.msg) ? x.msg : String(x)).join("; ");
+        if (typeof detail === "object" && detail.message) return detail.message;
+        try { return JSON.stringify(detail); } catch (e) { return fallback; }
     }
 
     // Download range mode switcher + fragment inputs
@@ -396,12 +420,16 @@ document.addEventListener("DOMContentLoaded", () => {
             });
 
             if (!res.ok) {
-                const err = await res.json();
-                if (err.detail && err.detail.error === "INSUFFICIENT_SPACE") {
+                let err = {};
+                try { err = await res.json(); } catch (e) { err = {}; }
+                const d = err.detail;
+                if (d && typeof d === "object" && (d.error === "INSUFFICIENT_SPACE" || d.status === "INSUFFICIENT_SPACE")) {
+                    await fetchDiskInfo();
                     checkSelectedQualitySpace();
+                    showToast(d.message || "Недостаточно места на диске для скачивания.", "err");
                     return;
                 }
-                throw new Error(err.detail || "Не удалось начать скачивание");
+                throw new Error(detailMessage(d, `Не удалось начать скачивание (HTTP ${res.status})`));
             }
 
             // Show Progress Section
@@ -414,13 +442,23 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Listen to SSE progress
+    // Listen to SSE progress (reconnects with backoff when the browser gives up,
+    // e.g. after a backend restart; stops once the download reached a final state)
     function listenToProgress() {
+        progressFinished = false;
+        progressRetryDelay = 1000;
+        openProgressStream();
+    }
+
+    function openProgressStream() {
+        if (progressRetryTimer) { clearTimeout(progressRetryTimer); progressRetryTimer = null; }
         if (eventSource) {
             eventSource.close();
         }
 
         eventSource = new EventSource("/api/progress");
+
+        eventSource.onopen = () => { progressRetryDelay = 1000; };
 
         eventSource.onmessage = (event) => {
             try {
@@ -432,12 +470,27 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         eventSource.onerror = () => {
-            console.warn("SSE connection error");
+            if (progressFinished) return;
+            // CONNECTING = the browser retries by itself; CLOSED = it gave up
+            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                eventSource.close();
+                eventSource = null;
+                console.warn(`SSE closed, reconnecting in ${progressRetryDelay} ms`);
+                progressRetryTimer = setTimeout(openProgressStream, progressRetryDelay);
+                progressRetryDelay = Math.min(15000, progressRetryDelay * 2);
+            }
         };
+    }
+
+    function finishProgress() {
+        progressFinished = true;
+        if (progressRetryTimer) { clearTimeout(progressRetryTimer); progressRetryTimer = null; }
+        if (eventSource) { eventSource.close(); eventSource = null; }
     }
 
     function updateProgressUI(data) {
         if (!data || data.status === "idle") return;
+        if (progressFinished) return;      // a reconnect must not replay the final state
 
         const pct = data.percent || 0;
         progressFill.style.width = `${pct}%`;
@@ -465,7 +518,7 @@ document.addEventListener("DOMContentLoaded", () => {
             statusMessage.innerHTML = `<strong>Готово!</strong> ${data.message}`;
             cancelDownloadBtn.style.display = "none";
             startDownloadBtn.disabled = false;
-            if (eventSource) eventSource.close();
+            finishProgress();
 
             // CRITICAL INTEGRATION: Notify Studio and auto-register in Media Library!
             if (window.Studio && window.Studio.onKickDownloadCompleted) {
@@ -477,14 +530,14 @@ document.addEventListener("DOMContentLoaded", () => {
             statusPill.style.color = "var(--danger)";
             statusMessage.textContent = data.message || "Произошла ошибка при загрузке.";
             startDownloadBtn.disabled = false;
-            if (eventSource) eventSource.close();
+            finishProgress();
         } else if (data.status === "cancelled") {
             statusPill.textContent = "Отменено";
             statusPill.style.background = "rgba(255, 255, 255, 0.1)";
             statusPill.style.color = "#fff";
             statusMessage.textContent = "Загрузка была прервана пользователем.";
             startDownloadBtn.disabled = false;
-            if (eventSource) eventSource.close();
+            finishProgress();
         }
     }
 
@@ -510,4 +563,3 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
-
