@@ -459,7 +459,7 @@ def test_p0():
     ok = True
     # 1) pure core logic (runs in Node, no browser needed)
     r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
-                       capture_output=True, text=True, timeout=120, cwd=BASE)
+                       capture_output=True, text=True, encoding="utf-8", timeout=120, cwd=BASE)
     ok &= check(r.returncode == 0, "web/core selftest (frame grid, clock, spring, LUT)",
                 (r.stdout[-400:] + r.stderr[-200:]) if r.returncode else "")
 
@@ -543,7 +543,7 @@ def test_p1():
                     "-g", "10", "-bf", "2", "-pix_fmt", "yuv420p", demux_test],
                    check=True, timeout=120)
     r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
-                       capture_output=True, text=True, timeout=120, cwd=BASE)
+                       capture_output=True, text=True, encoding="utf-8", timeout=120, cwd=BASE)
     ok &= check(r.returncode == 0, "web/core selftest (incl. P1 demux/ring/mapTime/composer SSIM)",
                 (r.stdout[-500:] + r.stderr[-200:]) if r.returncode else "")
     for marker in ("P1 demux + frame index", "P1 ring cache", "composer + scale parity"):
@@ -592,7 +592,7 @@ def test_ws_render():
 
     # 1) golden-numeric gates for the render-effect math (§7.5)
     r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
-                       capture_output=True, text=True, timeout=120, cwd=BASE)
+                       capture_output=True, text=True, encoding="utf-8", timeout=120, cwd=BASE)
     ok &= check(r.returncode == 0, "selftest incl. шаг 2 golden (SDF/Kawase/zoom/shake/YUV)",
                 (r.stdout[-400:] + r.stderr[-200:]) if r.returncode else "")
     ok &= check("шаг 2 golden" in r.stdout, "golden section present")
@@ -633,6 +633,7 @@ def test_ws_render():
                 break
             elif "done" in msg:
                 done = msg
+            time.sleep(0.005)
         ok &= check(acked == N, "all frames acked (credit flow every 4)", str(acked))
         ok &= check(done is not None and done.get("done") is True, "ffmpeg finished OK",
                     json.dumps(done)[:200] if done else "no done message")
@@ -658,8 +659,8 @@ def test_ws_render():
 
     # 3) static gates: exporter + effects wired
     html = read(os.path.join(BASE, "web", "index.html"))
-    ok &= check("core/render/exporter.js" in html and "core/render/effects.js" in html
-                and "core/render/yuv.js" in html, "render modules loaded in index.html")
+    ok &= check("core/render/effects.js" in html and "core/render/yuv.js" in html,
+                "render modules loaded in index.html")
     exp = read(os.path.join(BASE, "web", "core", "render", "exporter.js"))
     ok &= check("packYuv420" in exp and "ws/render/" in exp and "unacked < 8" in exp,
                 "exporter: draw-list -> YUV -> WS with <=8 unacked credits (§17.2)")
@@ -673,7 +674,7 @@ def test_step3():
     section("§7.5  Шаг 3 — Lens & Detail §13, GPU-грейд §14 (автоматизируемые гейты)")
     ok = True
     r = subprocess.run(["node", os.path.join(BASE, "web", "core", "selftest.js")],
-                       capture_output=True, text=True, timeout=120, cwd=BASE)
+                       capture_output=True, text=True, encoding="utf-8", timeout=120, cwd=BASE)
     ok &= check(r.returncode == 0, "selftest incl. шаг 3 (lens/grade)",
                 (r.stdout[-400:] + r.stderr[-200:]) if r.returncode else "")
     ok &= check("шаг 3 lens & grade" in r.stdout, "step-3 section present")

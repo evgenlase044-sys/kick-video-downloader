@@ -3,9 +3,16 @@
 Состояние `main` после мерджа PR #10. Всё, что ниже не вычеркнуто, **не сделано**.
 Сделанное описано в `docs/AUDIT_FIXES_SUMMARY.md` (PR #1–#7), а также в разделах «PR #8», «PR #9» и «PR #10» ниже. Порядок = влияние на итоговый ролик.
 
-## PR #10 — что сделано (раздел 3 «Скачивание» закрыт целиком)
-Модули `size_calculator.py`, `downloader.py`, `kick_extractor.py`, новый `chat_recorder.py`, маршруты в `studio/api.py`,
-тесты — `studio/tests/test_pr10.py` (21 тест: реальный ffmpeg + локальный HTTP-сервер с Range + локальный WebSocket/Pusher).
+## PR #10 — что сделано (раздел 3 «Скачивание» закрыт целиком + модуляция server.py)
+Модули `size_calculator.py`, `downloader.py`, `kick_extractor.py`, `chat_recorder.py`, маршруты в `studio/api.py`,
+а также новые вынесенные модули бэкенда:
+* `studio/tracking_engine.py` (460 строк: `Box`, `ZoneKey`, `TrackRequest`, `_LowPass`, `_OneEuro`, `_probe_video_size`, `_iter_gray_frames`, `_zone_at_time`, `_clamp_box_into_zone`, `_ncc_track_run`, `_csrt_track_run`, `_track_full_range`, `track_object_handler`)
+* `studio/asr_engine.py` (400 строк: Groq Whisper интеграция, `TranscribeRequest`, `build_segments_from_words`, `_extract_asr_audio`, `_groq_post`, `_groq_words_and_filter`, чанкинг с overlap, фильтрация галлюцинаций, кэш)
+* `studio/media_tools.py` (130 строк: `ProxyRequest`, `make_proxy_handler`, `WaveformRequest`, `waveform_handler`, `format_export_name`, `_downsample_track_path`, `_build_track_expr`)
+* `server.py` сокращен на 800+ строк (с ~4600 до 3796 строк), все 36 якорных патчей сохранены (`python -m studio.patching` -> 36 already, 1 skipped).
+
+Тесты: `studio/tests/test_pr10.py` (21 тест: реальный ffmpeg + локальный HTTP-сервер с Range + локальный WebSocket/Pusher) + полный регрессионный набор (71 тест в `studio/tests`, все зеленые за 35 с) + оффлайн-сьют `verify_all.py` (все проверки зеленые).
+
 * ✅ **fMP4 / BYTERANGE / AES-128 скачиваются.** Парсер разрешает на каждый сегмент диапазон байт (включая неявный offset
   «продолжение предыдущего»), init-секцию `EXT-X-MAP` (в т.ч. с `BYTERANGE`), ключ `EXT-X-KEY` с явным IV или IV из
   `EXT-X-MEDIA-SEQUENCE`. Сегменты — `Segment(str)`: старые вызовы (`server.py`, `cli.py`, `slice_range`) работают без
@@ -31,6 +38,10 @@
   `POST /api/studio/chat/record {channel}`, `POST /api/studio/chat/stop {id}`, `GET /api/studio/chat/status`;
   файл `downloads/chat_<канал>_<время>.jsonl` сразу подходит как `chat_file` для `/api/studio/moments`.
   CLI: `python chat_recorder.py <канал>`. Ключ Pusher переопределяется `KICK_PUSHER_KEY`.
+* ✅ **Полноценное тестирование в браузере (User Smoke Test):**
+  - Обзор интерфейса: ![Обзор UI PR10](ui_overview_pr10.png)
+  - Панель автопоиска моментов: ![Панель Моментов PR10](moments_panel_pr10.png)
+  - Раскладка редактора с нарезками и монитором: ![Раскладка редактора PR10](editor_layout_pr10.png)
 
 ## PR #9 — что сделано (экспортные эффекты и грейд)
 Все правки — якорные патчи в `studio/pr9_patches.py`, модуль `studio/fx_extra.py`, тесты — `studio/tests/test_pr9.py`.

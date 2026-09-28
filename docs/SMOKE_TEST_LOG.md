@@ -130,3 +130,31 @@ OK
    Динамическое субкадровое накопление на зумах и whip-переходах, действующее строго в интервале движения.
 7. **Раздельный грейд полос (PR #9):**
    Полосы вебки и геймплея в `split_adhd` грейдятся независимо с защитой оттенков кожи на лице.
+
+---
+
+## 5. Результаты проверок PR #10 и модульной декомпозиции
+1. **Декомпозиция монолитного `server.py`:**
+   - Вынесен `studio/tracking_engine.py` (460 строк): `Box`, `ZoneKey`, `TrackRequest`, `_LowPass`, `_OneEuro`, `_iter_gray_frames`, `_probe_video_size`, `track_object_handler`.
+   - Вынесен `studio/asr_engine.py` (400 строк): `TranscribeRequest`, `build_segments_from_words`, `_extract_asr_audio`, `_groq_post`, `_groq_words_and_filter`, `transcribe_media_handler`.
+   - Вынесен `studio/media_tools.py` (130 строк): `ProxyRequest`, `make_proxy_handler`, `WaveformRequest`, `waveform_handler`, `format_export_name`, `_downsample_track_path`, `_build_track_expr`.
+   - Все 36 якорных патчей `server.py` сохранены без единой поломки (`python -m studio.patching` -> 36 already, 1 skipped).
+2. **Прогон регрессионного набора unit-тестов (71 тест):**
+   ```text
+   Ran 71 tests in 35.086s
+   OK
+   ```
+   Включая 21 новый тест `test_pr10.py` (fMP4, BYTERANGE, AES-128, Kick JSON API, точный расчет размера, реконнект чат-рекордера).
+3. **Прогон полного оффлайн-сьюта `verify_all.py`:**
+   - Исправлена кодировка UTF-8 в вызовах subprocess Node для Windows.
+   - Добавлен `riser.mp3` в `sfx/CREDITS.md`.
+   - Результат: **ALL VERIFICATION CHECKS PASSED in 102.3s**.
+4. **Сквозное пользовательское тестирование в браузере (User Smoke Test):**
+   - Проверена загрузка приложения с защитным токеном (`http://127.0.0.1:8765/index.html?token=...`).
+   - Проверено переключение вкладок: медиабиблиотека, инспектор, нарезка, таймлайн.
+   - Проверена панель «🔥 Моменты»: вызов по плавающей кнопке, выбор шаблона (Hype/Story/Clean), поддержка чат-лога.
+   - Зафиксированы скриншоты интерфейса:
+     - Обзор интерфейса: `docs/ui_overview_pr10.png`
+     - Панель автопоиска моментов: `docs/moments_panel_pr10.png`
+     - Раскладка редактора: `docs/editor_layout_pr10.png`
+
