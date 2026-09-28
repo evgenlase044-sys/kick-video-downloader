@@ -1943,6 +1943,9 @@ class FxOverlay(BaseModel):
     z: int = 0                   # video-track index (0 = topmost track): the FX
                                  # affects only the composite built BELOW its track
     freq: float = 7.0            # shake frequency Hz (kind=shake)
+    # studio:fx-anchor-fields - zoom anchor (template face), 0..1 of the output
+    anchor_x: Optional[float] = None
+    anchor_y: Optional[float] = None
 
 class ExportLayer(BaseModel):
     """One video/image element from the timeline for layered compositing."""
@@ -3080,29 +3083,56 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             filter_parts.append(f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
         elif fx.kind == "zoom":
-            # §15 zoom punch, transition path: constant overscan (N11) then an
-            # animated crop window whose size follows the punch envelope.
+            # studio:zoom-anim - §15 zoom punch that REALLY animates. The old
+            # crop=w='iw/env' was a no-op: crop evaluates w/h once at init
+            # (t=NAN -> env=1), so every exported zoom was bit-identical to the
+            # input; crop x/y are also clamped to the INIT size, so a crop after
+            # a per-frame scale cannot move. Now: the frame is scaled per frame
+            # (scale eval=frame, lanczos) and overlaid onto itself at a per-frame
+            # offset that keeps the fx anchor (template face anchor, 0..1 of the
+            # output; default centre) fixed, clamped so no edge ever shows.
+            # Same envelope as before (and as the preview curve).
             a = max(0.02, min(0.5, float(fx.peak if fx.peak and fx.peak < 1 else 0.15)))
-            ov = 1 + 2 * a                       # constant overscan (no geometry pop)
-            env = f"(1+{a:.4f}*(0.12+0.88*exp(-3*max(t-{s0:.3f}\\,0)/{max(1e-3, d):.3f}))*between(t,{s0:.3f},{e0:.3f}))"
+            ax = getattr(fx, "anchor_x", None)
+            ay = getattr(fx, "anchor_y", None)
+            ax = 0.5 if ax is None else max(0.0, min(1.0, float(ax)))
+            ay = 0.5 if ay is None else max(0.0, min(1.0, float(ay)))
+            zx = (f"(1+{a:.4f}*(0.12+0.88*exp(-3*max(t-{s0:.3f}\\,0)/{max(1e-3, d):.3f}))"
+                  f"*between(t\\,{s0:.3f}\\,{e0:.3f}))")
+            ox = f"-max(0\\,min({out_w}*{zx}-{out_w}\\,{ax:.4f}*{out_w}*{zx}-{ax:.4f}*{out_w}))"
+            oy = f"-max(0\\,min({out_h}*{zx}-{out_h}\\,{ay:.4f}*{out_h}*{zx}-{ay:.4f}*{out_h}))"
             filter_parts.append(
-                f"{curr_v}scale=ceil(iw*{ov:.4f}/2)*2:ceil(ih*{ov:.4f}/2)*2[{tag_prefix}v{fi}o]")
+                f"{curr_v}scale={out_w}:{out_h}:flags=lanczos+accurate_rnd,"
+                f"split=2[{tag_prefix}v{fi}b][{tag_prefix}v{fi}s]")
             filter_parts.append(
-                f"[{tag_prefix}v{fi}o]crop=w='iw/{env}':h='ih/{env}':"
-                f"x='(iw-iw/{env})/2':y='(ih-ih/{env})/2',"
-                f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}]")
+                f"[{tag_prefix}v{fi}s]scale=w='2*trunc(iw*{zx}/2+0.5)':h='2*trunc(ih*{zx}/2+0.5)':"
+                f"eval=frame:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}z]")
+            filter_parts.append(
+                f"[{tag_prefix}v{fi}b][{tag_prefix}v{fi}z]overlay=x='{ox}':y='{oy}':eval=frame,"
+                f"setsar=1[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
         elif fx.kind == "lens":
-            # §13.4: static barrel + CA on the interval (animation = new renderer)
-            k1 = max(-0.45, min(0.45, float(fx.peak or 0.12)))
-            k1s = str(k1)
-            cx = 0.5 if fx.color in (None, "", "white") else 0.5
-            filter_parts.append(
-                f"{curr_v}lenscorrection=k1={k1s}:k2=0:cx=0.5:cy=0.5:enable={en}[{tag_prefix}v{fi}lc]")
-            shift = max(1, int(round(abs(k1) * 12)))
-            filter_parts.append(
-                f"[{tag_prefix}v{fi}lc]rgbashift=rh={shift}:bh=-{shift}:enable={en}[{tag_prefix}v{fi}]")
-            curr_v = f"[{tag_prefix}v{fi}]"
+            # studio:lens-anim - animated Lens Punch (§13.3). lenscorrection
+            # options are init-only, so the old code held one static barrel for
+            # the whole interval. k1 now follows the preview bell (canvasMonitor:
+            # peak at 32 % of the interval, width 0.35) in 6 enable-gated steps;
+            # the CA shift follows k1.
+            k1p = max(-0.45, min(0.45, float(fx.peak or 0.12)))
+            steps = 6
+            for si in range(steps):
+                t0 = s0 + d * si / steps
+                t1 = e0 if si == steps - 1 else s0 + d * (si + 1) / steps
+                pm = (si + 0.5) / steps
+                k = k1p * (2.718281828459045 ** (-((pm - 0.32) / 0.35) ** 2))
+                if abs(k) < 0.004:
+                    continue
+                sen = f"'gte(t,{t0:.3f})*lt(t,{t1:.3f})'"
+                shift = max(1, int(round(abs(k) * 12)))
+                lbl = f"[{tag_prefix}v{fi}l{si}]"
+                filter_parts.append(
+                    f"{curr_v}lenscorrection=k1={k:.4f}:k2=0:cx=0.5:cy=0.5:enable={sen},"
+                    f"rgbashift=rh={shift}:bh=-{shift}:enable={sen}{lbl}")
+                curr_v = lbl
         elif fx.kind == "threshold":
             # §15 threshold hit: hard luma gate + noise dither, 1-2 frames
             th = int(16 + (fx.peak if fx.peak is not None else 0.45) * 219)
