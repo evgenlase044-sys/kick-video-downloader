@@ -59,15 +59,13 @@ ADDFX_V2 = r'''    // studio:addfx-v2 - template/moment fx go through the SAME b
                     if (f.freq != null) ov.fxFreq = Number(f.freq);
                 }
                 if (f.anchor) ov.anchor = f.anchor;
-                const before = (state.tracks[tidOfFx()] || []).length;
                 state.currentTime = Math.max(0, base + s);
-                addEffectAtPlayhead(kind, f.color || "white", ov);
-                if ((state.tracks[tidOfFx()] || []).length > before) added++;
+                if (addEffectAtPlayhead(kind, f.color || "white", ov)) added++;  // studio:addfx-count
             }
         } finally {
             state.currentTime = savedTime;
         }
-        const fxTid = tidOfFx();
+        const fxTid = ensureFxTrack();  // studio:addfx-fxtrack
         if (state.tracks[fxTid]) state.tracks[fxTid].sort((a, b) => a.startTime - b.startTime);
         recalcTotalDuration();
         renderTimeline();
@@ -76,6 +74,36 @@ ADDFX_V2 = r'''    // studio:addfx-v2 - template/moment fx go through the SAME b
         return added;
     };
 
+'''
+
+# PR #7: addEffectAtPlayhead counted clips on tidOfFx() (first VIDEO track, can
+# be the main footage track) while addFxClip() writes to ensureFxTrack(). With
+# one footage clip and no fx track yet: before=1, after=1 -> the first fx of a
+# session silently lost the hotkey overrides (duration / peak / sound).
+FX_ADD_IDENTITY = r'''    function addEffectAtPlayhead(kind, color, overrides) {
+        // studio:fx-add-identity - the new clip is found by identity on the SAME
+        // track addFxClip() writes to; returns the clip (or null).
+        // §7.3 (W): whip ставится на ближайший рез (граница нарезки/клипа)
+        if (overrides && overrides.snapToCut) {
+            const cut = nearestCutTo(state.currentTime);
+            if (cut != null) seekTo(cut);
+        }
+        const tid = ensureFxTrack();
+        const before = new Set(state.tracks[tid] || []);
+        addFxClip(kind, color);
+        const c = (state.tracks[tid] || []).find(x => !before.has(x));
+        if (!c) return null;
+        if (c.isFx && overrides) {
+            const ov = Object.assign({}, overrides);
+            delete ov.snapToCut;
+            Object.assign(c, ov);
+            c.sourceDuration = c.duration;
+            c.title = fxLabel(c);
+        }
+        renderTimeline();
+        saveProject();
+        return c;
+    }
 '''
 
 EDITOR_PATCHES = [
@@ -117,6 +145,29 @@ EDITOR_PATCHES = [
           new=("            const added = window.studioAddFx(plan.fx, base, { timeBase: \"source\" });  // studio:addfx-source\n"
                "            if (added) showToast(`Шаблон «${plan.template || \"\"}»: добавлено ${added} эффектов на таймлайн`, \"ok\");\n"),
           marker="studio:addfx-source"),
+    # follow-ups for sources where the first ADDFX_V2 revision is already folded
+    Patch(id="addfx-count", group="addfx2",
+          old=("                const before = (state.tracks[tidOfFx()] || []).length;\n"
+               "                state.currentTime = Math.max(0, base + s);\n"
+               "                addEffectAtPlayhead(kind, f.color || \"white\", ov);\n"
+               "                if ((state.tracks[tidOfFx()] || []).length > before) added++;\n"),
+          new=("                state.currentTime = Math.max(0, base + s);\n"
+               "                if (addEffectAtPlayhead(kind, f.color || \"white\", ov)) added++;  // studio:addfx-count\n"),
+          marker="studio:addfx-count"),
+    Patch(id="addfx-fxtrack", group="addfx2",
+          old="        const fxTid = tidOfFx();\n",
+          new="        const fxTid = ensureFxTrack();  // studio:addfx-fxtrack\n",
+          marker="studio:addfx-fxtrack"),
+    Patch(id="fx-add-identity",
+          start="    function addEffectAtPlayhead(kind, color, overrides) {\n",
+          end="    function nearestCutTo(t) {\n",
+          new=FX_ADD_IDENTITY, marker="studio:fx-add-identity"),
+    # PR #7: "fx_" + Date.now() -> two fx added in the same ms shared one id
+    Patch(id="fx-unique-id",
+          old="            id: \"fx_\" + Date.now().toString(36),\n",
+          new=("            id: \"fx_\" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),"
+               "  // studio:fx-unique-id\n"),
+          marker="studio:fx-unique-id"),
     # PR #7: hotkey F wrote `peak`, every other path reads `fxPeak`
     Patch(id="flash-fxpeak", required=False,
           old="addEffectAtPlayhead(\"flash\", col, { duration: 0.18, peak: 0.95, fxSound: \"impact_epic\" });",
