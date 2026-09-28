@@ -67,7 +67,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T09:29:27Z, dbf7540)
+# CI report (2026-09-28T10:00:03Z, 8721852)
 
 ### ✅ python compile
 ```
@@ -140,37 +140,37 @@ web/index.html: {'skipped': 2, 'already': 3}
 
 ### ✅ python regression tests
 ```
-test_server_patch_signature (studio.tests.test_audit.DiskManagerTest.test_server_patch_signature) ... ok
-test_resume_key_stable_across_signed_urls (studio.tests.test_audit.DownloaderTest.test_resume_key_stable_across_signed_urls) ... ok
-test_parse (studio.tests.test_audit.HlsParserTest.test_parse) ... ok
-test_slice_validation (studio.tests.test_audit.HlsParserTest.test_slice_validation) ... ok
-test_fps_exact (studio.tests.test_audit.HooksTest.test_fps_exact) ... ok
-test_ramp_duration_preserving (studio.tests.test_audit.HooksTest.test_ramp_duration_preserving) ... ok
-test_short_words_kept (studio.tests.test_audit.HooksTest.test_short_words_kept) ... ok
-test_time_remap_filters (studio.tests.test_audit.HooksTest.test_time_remap_filters) ... ok
-test_finds_injected_peak (studio.tests.test_audit.MomentsTest.test_finds_injected_peak) ... ok
-test_llm_fallback (studio.tests.test_audit.MomentsTest.test_llm_fallback) ... ok
-test_all_required_patches_apply (studio.tests.test_audit.PatchAnchorsTest.test_all_required_patches_apply) ... ok
-test_header_limits_and_command (studio.tests.test_audit.RenderWsTest.test_header_limits_and_command) ... ok
-test_paths_and_hosts (studio.tests.test_audit.SecurityTest.test_paths_and_hosts) ... ok
-test_policy (studio.tests.test_audit.TemplatesTest.test_policy) ... ok
-test_codec_block_replaced_and_input_tags_kept (studio.tests.test_export_pipeline.ArgvRewriteTest.test_codec_block_replaced_and_input_tags_kept) ... ok
-test_export_encode_detected_only_in_export_dir (studio.tests.test_export_pipeline.ArgvRewriteTest.test_export_encode_detected_only_in_export_dir) ... ok
-test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.test_fps_override_and_ntsc) ... ok
-test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
-test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
-test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x55b3c3467680] Impossible to open '/tmp/tmplfszyyhm/ovjob/000000.png'
-[in#1 @ 0x55b3c345cdc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmplfszyyhm/ovjob/list.ffconcat.
-Error opening input files: No such file or directory
-), falling back to ASS
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
-test_multi_clip_split (studio.tests.test_export_pipeline.ExportWrapperTest.test_multi_clip_split) ... ok
-test_passthrough_without_options (studio.tests.test_export_pipeline.ExportWrapperTest.test_passthrough_without_options) ... ok
-test_grade_chain_runs (studio.tests.test_export_pipeline.GradeAndOverlayTest.test_grade_chain_runs) ... ok
-test_header_validation (studio.tests.test_export_pipeline.GradeAndOverlayTest.test_header_validation) ... ok
-test_overlay_lands_on_exact_frame (studio.tests.test_export_pipeline.GradeAndOverlayTest.test_overlay_lands_on_exact_frame) ... ok
+test_slug_validation (studio.tests.test_pr10.ChatRecorderTest.test_slug_validation) ... ok
+test_aes128_slice_keeps_sequence_iv (studio.tests.test_pr10.HlsDownloadE2ETest.test_aes128_slice_keeps_sequence_iv)
+Sliced list starting at segment 2: IV must stay = original media sequence. ... ok
+test_aes128_ts (studio.tests.test_pr10.HlsDownloadE2ETest.test_aes128_ts) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:218: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpsydc2a9p/aes.m3u8' mode='r' encoding='UTF-8'>
+  self.assertIn("METHOD=AES-128", open(os.path.join(self.root, "aes.m3u8")).read())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_byterange_single_file (studio.tests.test_pr10.HlsDownloadE2ETest.test_byterange_single_file) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:247: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmp921c39xg/b.m3u8' mode='r' encoding='UTF-8'>
+  text = open(os.path.join(self.root, "b.m3u8")).read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_fmp4 (studio.tests.test_pr10.HlsDownloadE2ETest.test_fmp4) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:239: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpiwuh875f/f.m3u8' mode='r' encoding='UTF-8'>
+  self.assertIn("#EXT-X-MAP", open(os.path.join(self.root, "f.m3u8")).read())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_plain_ts_still_concat (studio.tests.test_pr10.HlsDownloadE2ETest.test_plain_ts_still_concat) ... ok
+test_byterange_map_key_resolution (studio.tests.test_pr10.HlsParserV2Test.test_byterange_map_key_resolution) ... ok
+test_drm_is_rejected_clearly (studio.tests.test_pr10.HlsParserV2Test.test_drm_is_rejected_clearly) ... ok
+test_local_playlist_has_explicit_iv_and_map (studio.tests.test_pr10.HlsParserV2Test.test_local_playlist_has_explicit_iv_and_map) ... ok
+test_resume_key_tells_ranges_apart (studio.tests.test_pr10.HlsParserV2Test.test_resume_key_tells_ranges_apart) ... ok
+test_slice_keeps_segment_attributes (studio.tests.test_pr10.HlsParserV2Test.test_slice_keeps_segment_attributes) ... ok
+test_live_channel_and_media_playlist_as_source (studio.tests.test_pr10.KickExtractorApiTest.test_live_channel_and_media_playlist_as_source) ... ok
+test_offline_channel_message (studio.tests.test_pr10.KickExtractorApiTest.test_offline_channel_message) ... ok
+test_url_parsing (studio.tests.test_pr10.KickExtractorApiTest.test_url_parsing) ... ok
+test_v1_then_channel_videos_then_html (studio.tests.test_pr10.KickExtractorApiTest.test_v1_then_channel_videos_then_html) ... ok
+test_v2_video_api_first (studio.tests.test_pr10.KickExtractorApiTest.test_v2_video_api_first) ... ok
+test_head_refused_falls_back_to_ranged_get (studio.tests.test_pr10.SizeEstimateTest.test_head_refused_falls_back_to_ranged_get) ... ok
+test_short_playlist_is_exact (studio.tests.test_pr10.SizeEstimateTest.test_short_playlist_is_exact) ... ok
+test_stratified_sampling_is_accurate_and_bounded (studio.tests.test_pr10.SizeEstimateTest.test_stratified_sampling_is_accurate_and_bounded) ... ok
 test_export_wrapper_applies_gate_on_plain_exports (studio.tests.test_pr7.LoudnessGateTest.test_export_wrapper_applies_gate_on_plain_exports) ... ok
 test_loud_clip_true_peak_limited (studio.tests.test_pr7.LoudnessGateTest.test_loud_clip_true_peak_limited) ... ok
 test_no_audio_is_skipped (studio.tests.test_pr7.LoudnessGateTest.test_no_audio_is_skipped) ... ok
@@ -197,7 +197,7 @@ test_lens_parts_have_overscan_and_no_rgbashift (studio.tests.test_pr9.Pr9FxTest.
 test_split_top_h (studio.tests.test_pr9.Pr9FxTest.test_split_top_h) ... ok
 
 ----------------------------------------------------------------------
-Ran 50 tests in 11.963s
+Ran 71 tests in 17.148s
 
 OK
 ```
@@ -213,6 +213,11 @@ OK
 [studio] server.py patches: {'already': 30, 'skipped': 1}
 [studio] export pipeline: {'grade': True, 'encoder_shim': True, 'export_route': True, 'loudness_gate': True}
 {'grade': True, 'encoder_shim': True, 'export_route': True, 'loudness_gate': True}
+```
+
+### ✅ studio API exposes chat recording (PR #10)
+```
+['/api/studio/chat/record', '/api/studio/chat/status', '/api/studio/chat/stop', '/api/studio/moments', '/api/studio/templates', '/api/studio/templates/plan']
 ```
 
 ### ✅ web core selftest
