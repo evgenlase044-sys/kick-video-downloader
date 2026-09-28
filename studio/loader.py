@@ -14,6 +14,7 @@ if BASE_DIR not in sys.path:
 
 from studio.patching import apply_patches, read_source, summarize  # noqa: E402
 from studio.server_patches import SERVER_PATCHES  # noqa: E402
+import studio.pr8_patches  # noqa: E402,F401  (PR #8: appended to SERVER_PATCHES in place)
 
 REPORT = []
 

@@ -1,7 +1,7 @@
 ## Fold log
 ```
 
-server.py: {'already': 27, 'skipped': 1}
+server.py: {'already': 30, 'skipped': 1}
   already  hooks-import                 marker present
   already  progress-nameerror           marker present
   already  cookies-range                marker present
@@ -30,8 +30,11 @@ server.py: {'already': 27, 'skipped': 1}
   skipped  dead-ass-generator           guard declined
   already  version-mtime                marker present
   already  main-secure                  marker present
+  already  fx-anchor-fields             marker present
+  already  zoom-anim                    marker present
+  already  lens-anim                    marker present
 
-web/editor.js: {'already': 10}
+web/editor.js: {'already': 17}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
@@ -42,6 +45,13 @@ web/editor.js: {'already': 10}
   already  fx-add-identity              marker present
   already  fx-unique-id                 marker present
   already  flash-fxpeak                 marker present
+  already  hoist-collectors-subs        replacement present
+  already  hoist-collectors-text        replacement present
+  already  hoist-collectors-fx          replacement present
+  already  hoist-collectors-define      marker present
+  already  preview-frame-v2             marker present
+  already  face-anchor-norm             marker present
+  already  drop-tidOfFx                 marker present
 
 web/index.html: {'skipped': 2, 'already': 3}
   skipped  drop-dead-exporter           guard declined
@@ -51,7 +61,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T05:37:10Z, 73f372a)
+# CI report (2026-09-28T08:23:19Z, 8dd38a3)
 
 ### ✅ python compile
 ```
@@ -61,7 +71,7 @@ web/index.html: {'skipped': 2, 'already': 3}
 ### ✅ anchored patches (server.py / editor.js / index.html)
 ```
 
-server.py: {'already': 27, 'skipped': 1}
+server.py: {'already': 30, 'skipped': 1}
   already  hooks-import                 marker present
   already  progress-nameerror           marker present
   already  cookies-range                marker present
@@ -90,8 +100,11 @@ server.py: {'already': 27, 'skipped': 1}
   skipped  dead-ass-generator           guard declined
   already  version-mtime                marker present
   already  main-secure                  marker present
+  already  fx-anchor-fields             marker present
+  already  zoom-anim                    marker present
+  already  lens-anim                    marker present
 
-web/editor.js: {'already': 10}
+web/editor.js: {'already': 17}
   already  tdz-declare-early            marker present
   already  tdz-drop-late                marker present
   already  queue-sse-reconnect          marker present
@@ -102,6 +115,13 @@ web/editor.js: {'already': 10}
   already  fx-add-identity              marker present
   already  fx-unique-id                 marker present
   already  flash-fxpeak                 marker present
+  already  hoist-collectors-subs        replacement present
+  already  hoist-collectors-text        replacement present
+  already  hoist-collectors-fx          replacement present
+  already  hoist-collectors-define      marker present
+  already  preview-frame-v2             marker present
+  already  face-anchor-norm             marker present
+  already  drop-tidOfFx                 marker present
 
 web/index.html: {'skipped': 2, 'already': 3}
   skipped  drop-dead-exporter           guard declined
@@ -134,9 +154,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x55fcf7d01680] Impossible to open '/tmp/tmpb8ssd215/ovjob/000000.png'
-[in#1 @ 0x55fcf7cf6dc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmpb8ssd215/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x5624a53a8680] Impossible to open '/tmp/tmpbi3vx0c8/ovjob/000000.png'
+[in#1 @ 0x5624a539ddc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmpbi3vx0c8/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -153,22 +173,33 @@ test_quiet_clip_is_normalized_and_video_kept (studio.tests.test_pr7.LoudnessGate
 test_editor_patches (studio.tests.test_pr7.Pr7PatchesTest.test_editor_patches) ... ok
 test_gl_lens_shader_has_no_debug_output (studio.tests.test_pr7.Pr7PatchesTest.test_gl_lens_shader_has_no_debug_output) ... ok
 test_server_patches (studio.tests.test_pr7.Pr7PatchesTest.test_server_patches) ... ok
+test_collectors_live_outside_initClipperPanel (studio.tests.test_pr8.Pr8EditorTest.test_collectors_live_outside_initClipperPanel) ... ok
+test_face_anchor_is_normalized_object (studio.tests.test_pr8.Pr8EditorTest.test_face_anchor_is_normalized_object) ... ok
+test_fx_anchor_exported (studio.tests.test_pr8.Pr8EditorTest.test_fx_anchor_exported) ... ok
+test_patched_editor_parses (studio.tests.test_pr8.Pr8EditorTest.test_patched_editor_parses) ... ok
+test_patches_applied (studio.tests.test_pr8.Pr8EditorTest.test_patches_applied) ... ok
+test_preview_frame_has_no_undefined_token (studio.tests.test_pr8.Pr8EditorTest.test_preview_frame_has_no_undefined_token) ... ok
+[studio] server.py patches: {'already': 30, 'skipped': 1}
+test_lens_punch_is_animated (studio.tests.test_pr8.Pr8ExportFxTest.test_lens_punch_is_animated) ... ok
+test_mixed_chain_renders (studio.tests.test_pr8.Pr8ExportFxTest.test_mixed_chain_renders) ... ok
+test_zoom_anchor_moves_the_punch (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_anchor_moves_the_punch) ... ok
+test_zoom_really_zooms_only_inside_its_window (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_really_zooms_only_inside_its_window) ... ok
 
 ----------------------------------------------------------------------
-Ran 35 tests in 9.592s
+Ran 45 tests in 11.247s
 
 OK
 ```
 
 ### ✅ server imports with fixes (studio.loader)
 ```
-[studio] server.py patches: {'already': 27, 'skipped': 1}
-28 patches
+[studio] server.py patches: {'already': 30, 'skipped': 1}
+31 patches
 ```
 
 ### ✅ export pipeline installs into the real server
 ```
-[studio] server.py patches: {'already': 27, 'skipped': 1}
+[studio] server.py patches: {'already': 30, 'skipped': 1}
 [studio] export pipeline: {'grade': True, 'encoder_shim': True, 'export_route': True, 'loudness_gate': True}
 {'grade': True, 'encoder_shim': True, 'export_route': True, 'loudness_gate': True}
 ```

@@ -1843,7 +1843,18 @@
                 if (!baseClip) return null;
                 const box = baseClip.trackPath && baseClip.trackPath.length ? trackPosAt(baseClip, t) : null;
                 if (!box) return null;
-                return [box.x + box.w / 2, box.y + box.h / 2];
+                // studio:face-anchor-norm - canvasMonitor reads anchor.x / anchor.y
+                // as 0..1 of the frame; an array gave NaN (broken zoom transform).
+                let fx_ = box.x + box.w / 2, fy_ = box.y + box.h / 2;
+                if (!isFinite(fx_) || !isFinite(fy_)) return null;
+                if (fx_ > 1.001 || fy_ > 1.001) {       // track box in source pixels
+                    const m = baseClip.media || {};
+                    const mw = Number(m.width || m.w || (videoEl && videoEl.videoWidth)) || 1920;
+                    const mh = Number(m.height || m.h || (videoEl && videoEl.videoHeight)) || 1080;
+                    fx_ /= mw; fy_ /= mh;
+                }
+                // keep the punch inside the frame even for a face at the very edge
+                return { x: Math.max(0.15, Math.min(0.85, fx_)), y: Math.max(0.15, Math.min(0.85, fy_)) };
             },
             cueAt(t) {
                 const clip = currentCueClip(t);
@@ -3324,90 +3335,9 @@
         // Сборка payload экспорта из нарезок таймлайна + слов-клипов слоя титров
         // Субтитры уходят в ВЫХОДНОМ времени нарезки (subs_in_output_time) —
         // сервер больше не перемапливает их повторно (раньше это резало половину реплик)
-        function collectRegionSubtitles(regs, outBases) {
-            // subtitle AND free-text clips from ALL text layers AND video layers
-            const tclips = [];
-            for (const tid of trackOrder()) {
-                const track = getTrack(tid);
-                if (!track || track.kind === "audio") continue;
-                for (const c of (state.tracks[tid] || [])) {
-                    if (c.isFx || c.media || !c.title) continue;
-                    if (!isTextClip(c)) continue;
-                    tclips.push(c);
-                }
-            }
-            tclips.sort((a, b) => a.startTime - b.startTime);
-            const subs = [];
-            regs.forEach((r, k) => {
-                const base = outBases[k];
-                for (const c of tclips) {
-                    if (c.freeText) continue; // free text -> separate text_items
-                    const cs = c.startTime, ce = c.startTime + c.duration;
-                    if (ce <= r.startTime + 0.02 || cs >= r.startTime + r.duration - 0.02) continue;
-                    const words = Array.isArray(c.words) && c.words.length ? c.words : [{
-                        word: c.title || "",
-                        abs_start: Math.max(cs, r.startTime),
-                        abs_end: Math.min(ce, r.startTime + r.duration)
-                    }];
-                    const wout = [];
-                    for (const w of words) {
-                        const ws = Math.max(w.abs_start, r.startTime) - r.startTime;
-                        const we = Math.min(w.abs_end, r.startTime + r.duration) - r.startTime;
-                        if (!(we > ws + 0.03)) continue;
-                        wout.push({ word: w.word, start: base + ws, end: base + we, style: c.subtitleStyle || null });
-                    }
-                    if (!wout.length) continue;
-                    subs.push({
-                        text: c.title || "",
-                        start: base + Math.max(0, cs - r.startTime),
-                        end: base + Math.min(r.duration, ce - r.startTime),
-                        abs_start: base + Math.max(0, cs - r.startTime),
-                        abs_end: base + Math.min(r.duration, ce - r.startTime),
-                        style: c.subtitleStyle || null,
-                        words: wout,
-                        // позиция, перенесённая вручную на превью (0..1 доли кадра)
-                        x: c.textX != null ? c.textX : null,
-                        y: c.textY != null ? c.textY : null
-                    });
-                }
-            });
-            return subs;
-        }
+        // collectRegionSubtitles -> module scope (studio:hoist-collectors)
         // Свободный текст (не субтитры): полные параметры как у субтитров
-        function collectRegionTextItems(regs, outBases) {
-            const items = [];
-            for (const tid of trackOrder()) {
-                const track = getTrack(tid);
-                if (!track || track.kind === "audio") continue;
-                for (const c of (state.tracks[tid] || [])) {
-                    if (!c.isText || !c.freeText || !c.title) continue;
-                    regs.forEach((r, k) => {
-                        const base = outBases[k];
-                        const cs = c.startTime, ce = c.startTime + c.duration;
-                        if (ce <= r.startTime + 0.02 || cs >= r.startTime + r.duration - 0.02) return;
-                        const s = base + Math.max(0, cs - r.startTime);
-                        const e = base + Math.min(r.duration, ce - r.startTime);
-                        if (!(e > s + 0.05)) return;
-                        items.push({
-                            text: c.title,
-                            start: s, end: e,
-                            font: c.textFont || state.clipper.subFont || "Montserrat ExtraBold",
-                            size: Math.round((c.textSize || 6.0) * 1920 / 100), // % of 1080x1920 height -> px
-                            color: c.textColor || "#ffffff",
-                            glow: c.textGlow != null ? c.textGlow : 55,
-                            anim_in: c.textAnimIn || "pop",
-                            anim_out: c.textAnimOut || "fade",
-                            x: c.textX != null ? c.textX : 0.5,
-                            y: c.textY != null ? c.textY : 0.72,
-                            shake: !!c.textShake,
-                            stroke: c.textStroke != null ? c.textStroke : 0,
-                            spacing: c.textSpacing != null ? c.textSpacing : 0
-                        });
-                    });
-                }
-            }
-            return items;
-        }
+        // collectRegionTextItems -> module scope (studio:hoist-collectors)
         function resolveRegionSource(r) {
             const mc = resolvePackSource(r.startTime);
             if (!mc || !mc.media) return null;
@@ -3419,40 +3349,7 @@
         // FX overlays + sounds + timeline audio mapped into one region's output.
         // z = позиция слоя в trackList (0 = верхний): вспышка под верхними
         // элементами НЕ действует на них (сервер жжёт её только под композитом)
-        function collectRegionFx(r) {
-            const overlays = [];
-            const sounds = [];
-            const order = trackOrder();
-            for (let zi = 0; zi < order.length; zi++) {
-                const tid = order[zi];
-                const track = getTrack(tid);
-                if (!track || track.kind !== "video") continue;
-                for (const c of (state.tracks[tid] || [])) {
-                    if (!c.isFx) continue;
-                    const cs = c.startTime, ce = c.startTime + c.duration;
-                    if (ce <= r.startTime + 0.02 || cs >= r.startTime + r.duration - 0.02) continue;
-                    overlays.push({
-                        start: Math.max(0, cs - r.startTime),
-                        end: Math.min(r.duration, ce - r.startTime),
-                        kind: c.fxKind || "flash",
-                        color: c.fxColor || "white",
-                        peak: c.fxPeak != null ? c.fxPeak : 0.75,
-                        bar_h: c.fxBarH || 120,
-                        amp: c.fxAmp || 12,
-                        freq: c.fxFreq || 7,
-                        z: zi
-                    });
-                    if (c.fxSound && c.fxSound !== "none") {
-                        sounds.push({
-                            at: Math.max(0, cs - r.startTime),
-                            kind: c.fxSound,
-                            gain: c.fxGain != null ? c.fxGain : 1.0
-                        });
-                    }
-                }
-            }
-            return { overlays, sounds };
-        }
+        // collectRegionFx -> module scope (studio:hoist-collectors)
         function collectRegionAudio(r) {
             const out = [];
             for (const tid of trackOrder()) {
@@ -3934,25 +3831,170 @@
         if (cue && cue.text) return { text: cue.text, template: state.clipper.subtitleTemplate };
         return null;
     }
+    // studio:hoist-collectors - region collectors live at MODULE scope: the
+    // server preview frame (requestServerPreviewFrame) and the export
+    // (initClipperPanel) both call them. They were local to initClipperPanel ->
+    // ReferenceError: collectRegionSubtitles is not defined (PR #7 smoke test).
+    function collectRegionSubtitles(regs, outBases) {
+        // subtitle AND free-text clips from ALL text layers AND video layers
+        const tclips = [];
+        for (const tid of trackOrder()) {
+            const track = getTrack(tid);
+            if (!track || track.kind === "audio") continue;
+            for (const c of (state.tracks[tid] || [])) {
+                if (c.isFx || c.media || !c.title) continue;
+                if (!isTextClip(c)) continue;
+                tclips.push(c);
+            }
+        }
+        tclips.sort((a, b) => a.startTime - b.startTime);
+        const subs = [];
+        regs.forEach((r, k) => {
+            const base = outBases[k];
+            for (const c of tclips) {
+                if (c.freeText) continue; // free text -> separate text_items
+                const cs = c.startTime, ce = c.startTime + c.duration;
+                if (ce <= r.startTime + 0.02 || cs >= r.startTime + r.duration - 0.02) continue;
+                const words = Array.isArray(c.words) && c.words.length ? c.words : [{
+                    word: c.title || "",
+                    abs_start: Math.max(cs, r.startTime),
+                    abs_end: Math.min(ce, r.startTime + r.duration)
+                }];
+                const wout = [];
+                for (const w of words) {
+                    const ws = Math.max(w.abs_start, r.startTime) - r.startTime;
+                    const we = Math.min(w.abs_end, r.startTime + r.duration) - r.startTime;
+                    if (!(we > ws + 0.03)) continue;
+                    wout.push({ word: w.word, start: base + ws, end: base + we, style: c.subtitleStyle || null });
+                }
+                if (!wout.length) continue;
+                subs.push({
+                    text: c.title || "",
+                    start: base + Math.max(0, cs - r.startTime),
+                    end: base + Math.min(r.duration, ce - r.startTime),
+                    abs_start: base + Math.max(0, cs - r.startTime),
+                    abs_end: base + Math.min(r.duration, ce - r.startTime),
+                    style: c.subtitleStyle || null,
+                    words: wout,
+                    // позиция, перенесённая вручную на превью (0..1 доли кадра)
+                    x: c.textX != null ? c.textX : null,
+                    y: c.textY != null ? c.textY : null
+                });
+            }
+        });
+        return subs;
+    }
+    function collectRegionTextItems(regs, outBases) {
+        const items = [];
+        for (const tid of trackOrder()) {
+            const track = getTrack(tid);
+            if (!track || track.kind === "audio") continue;
+            for (const c of (state.tracks[tid] || [])) {
+                if (!c.isText || !c.freeText || !c.title) continue;
+                regs.forEach((r, k) => {
+                    const base = outBases[k];
+                    const cs = c.startTime, ce = c.startTime + c.duration;
+                    if (ce <= r.startTime + 0.02 || cs >= r.startTime + r.duration - 0.02) return;
+                    const s = base + Math.max(0, cs - r.startTime);
+                    const e = base + Math.min(r.duration, ce - r.startTime);
+                    if (!(e > s + 0.05)) return;
+                    items.push({
+                        text: c.title,
+                        start: s, end: e,
+                        font: c.textFont || state.clipper.subFont || "Montserrat ExtraBold",
+                        size: Math.round((c.textSize || 6.0) * 1920 / 100), // % of 1080x1920 height -> px
+                        color: c.textColor || "#ffffff",
+                        glow: c.textGlow != null ? c.textGlow : 55,
+                        anim_in: c.textAnimIn || "pop",
+                        anim_out: c.textAnimOut || "fade",
+                        x: c.textX != null ? c.textX : 0.5,
+                        y: c.textY != null ? c.textY : 0.72,
+                        shake: !!c.textShake,
+                        stroke: c.textStroke != null ? c.textStroke : 0,
+                        spacing: c.textSpacing != null ? c.textSpacing : 0
+                    });
+                });
+            }
+        }
+        return items;
+    }
+    // FX overlays + sounds mapped into one region's output.
+    // z = позиция слоя в trackList (0 = верхний): вспышка под верхними
+    // элементами НЕ действует на них (сервер жжёт её только под композитом)
+    function collectRegionFx(r) {
+        const overlays = [];
+        const sounds = [];
+        const order = trackOrder();
+        for (let zi = 0; zi < order.length; zi++) {
+            const tid = order[zi];
+            const track = getTrack(tid);
+            if (!track || track.kind !== "video") continue;
+            for (const c of (state.tracks[tid] || [])) {
+                if (!c.isFx) continue;
+                const cs = c.startTime, ce = c.startTime + c.duration;
+                if (ce <= r.startTime + 0.02 || cs >= r.startTime + r.duration - 0.02) continue;
+                const ov = {
+                    start: Math.max(0, cs - r.startTime),
+                    end: Math.min(r.duration, ce - r.startTime),
+                    kind: c.fxKind || "flash",
+                    color: c.fxColor || "white",
+                    peak: c.fxPeak != null ? c.fxPeak : 0.75,
+                    bar_h: c.fxBarH || 120,
+                    amp: c.fxAmp || 12,
+                    freq: c.fxFreq || 7,
+                    z: zi
+                };
+                // studio:fx-anchor-export - template face anchor (0..1 of the frame)
+                const an = c.anchor;
+                if (an && isFinite(Number(an.x)) && isFinite(Number(an.y))) {
+                    ov.anchor_x = Math.max(0, Math.min(1, Number(an.x)));
+                    ov.anchor_y = Math.max(0, Math.min(1, Number(an.y)));
+                }
+                overlays.push(ov);
+                if (c.fxSound && c.fxSound !== "none") {
+                    sounds.push({
+                        at: Math.max(0, cs - r.startTime),
+                        kind: c.fxSound,
+                        gain: c.fxGain != null ? c.fxGain : 1.0
+                    });
+                }
+            }
+        }
+        return { overlays, sounds };
+    }
+
     // Серверный кадр превью: рендер тем же фильтр-графом, что и экспорт (WYSIWYG)
     let pvTimer = null;
     function hideServerPreviewFrame() {
         const img = document.getElementById("serverFrameImg");
         if (img) img.style.display = "none";
     }
+    // studio:preview-frame-v2 - (1) the collectors are module-level now (was a
+    // ReferenceError); (2) the stale-frame guard compared with an undefined
+    // `token` (ReferenceError in onload: the frame never appeared) -> request
+    // sequence number; (3) superseded blob URLs are revoked (leak on scrubbing);
+    // (4) a late response never overwrites a newer frame.
+    let pvSeq = 0;
+    let pvShownUrl = null;
     function requestServerPreviewFrame() {
-        const img = document.getElementById("serverFrameImg");
         if (state.isPlaying) { hideServerPreviewFrame(); return; }
         const r = (state.regions || []).find(rg => state.currentTime >= rg.startTime && state.currentTime < rg.startTime + rg.duration);
         if (!r) { hideServerPreviewFrame(); return; }
         const mc = resolvePackSource(r.startTime);
         if (!mc || !mc.media) { hideServerPreviewFrame(); return; }
         if (pvTimer) clearTimeout(pvTimer);
+        const seq = ++pvSeq;
         pvTimer = setTimeout(async () => {
-            if (state.isPlaying) return;
-            const subs = collectRegionSubtitles([r], [0]);
-            const tis = collectRegionTextItems([r], [0]);
-            const fx = collectRegionFx(r);
+            if (state.isPlaying || seq !== pvSeq) return;
+            let subs, tis, fx;
+            try {
+                subs = collectRegionSubtitles([r], [0]);
+                tis = collectRegionTextItems([r], [0]);
+                fx = collectRegionFx(r);
+            } catch (e) {
+                console.warn("[preview-frame] collect failed:", e);
+                return;
+            }
             const srcTime = (mc.sourceOffset || 0) + (state.currentTime - mc.startTime);
             const payload = {
                 source_file: mc.media.filename, src_time: srcTime,
@@ -3965,8 +4007,9 @@
             };
             try {
                 const res = await fetch("/api/preview-frame", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-                if (!res.ok) return;
+                if (!res.ok || seq !== pvSeq) return;
                 const blob = await res.blob();
+                if (seq !== pvSeq || state.isPlaying) return;
                 let img = document.getElementById("serverFrameImg");
                 if (!img) {
                     img = document.createElement("img");
@@ -3979,9 +4022,14 @@
                 const url = URL.createObjectURL(blob);
                 const probe = new Image();
                 probe.onload = () => {
-                    if (img.dataset.token === token) { img.src = url; img.style.display = "block"; }
+                    if (seq !== pvSeq || state.isPlaying) { URL.revokeObjectURL(url); return; }
+                    const prev = pvShownUrl;
+                    pvShownUrl = url;
+                    img.src = url;
+                    img.style.display = "block";
+                    if (prev && prev !== url) URL.revokeObjectURL(prev);
                 };
-                img.dataset.token = url;
+                probe.onerror = () => URL.revokeObjectURL(url);
                 probe.src = url;
             } catch (e) { /* превью не критично */ }
         }, 380);
@@ -5269,14 +5317,7 @@
         }
         return best;
     }
-    function tidOfFx() {
-        const order = trackOrder();
-        for (const tid of order) {
-            const tr = getTrack(tid);
-            if (tr && tr.kind === "video") return tid;
-        }
-        return ensureFxTrack();
-    }
+    // tidOfFx() removed: unused since PR #7 (studio:drop-tidOfFx)
     // ── §9.4: пресет канала — рамки/раскладка/стиль/словарь одним нажатием (P) ──
     async function applyChannelPreset() {
         const handle = (state.clipper.streamerHandle || "").replace("@", "").trim();
