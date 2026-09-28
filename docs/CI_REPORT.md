@@ -1,7 +1,7 @@
 ## Fold log
 ```
 
-server.py: {'already': 30, 'skipped': 1, 'applied': 6}
+server.py: {'already': 36, 'skipped': 1}
   already  hooks-import                 marker present
   already  progress-nameerror           marker present
   already  cookies-range                marker present
@@ -33,13 +33,12 @@ server.py: {'already': 30, 'skipped': 1, 'applied': 6}
   already  fx-anchor-fields             marker present
   already  zoom-anim                    marker present
   already  lens-anim                    marker present
-  applied  zoom-mblur                   1x
-  applied  lens-v2                      replaced 1205 chars
-  applied  whip-mblur                   1x
-  applied  grade-bands-layered          1x
-  applied  grade-bands-pack             1x
-  applied  grade-bands-preview          1x
-  -> written server.py
+  already  zoom-mblur                   marker present
+  already  lens-v2                      marker present
+  already  whip-mblur                   marker present
+  already  grade-bands-layered          marker present
+  already  grade-bands-pack             marker present
+  already  grade-bands-preview          marker present
 
 web/editor.js: {'already': 17}
   already  tdz-declare-early            marker present
@@ -68,7 +67,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T08:47:20Z, 56f444d)
+# CI report (2026-09-28T08:57:58Z, 57dd881)
 
 ### ✅ python compile
 ```
@@ -161,9 +160,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x55cda149d680] Impossible to open '/tmp/tmp2mmtizui/ovjob/000000.png'
-[in#1 @ 0x55cda1492dc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmp2mmtizui/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x560091438680] Impossible to open '/tmp/tmpu_yfje6p/ovjob/000000.png'
+[in#1 @ 0x56009142ddc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmpu_yfje6p/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -198,7 +197,7 @@ test_lens_parts_have_overscan_and_no_rgbashift (studio.tests.test_pr9.Pr9FxTest.
 test_split_top_h (studio.tests.test_pr9.Pr9FxTest.test_split_top_h) ... ok
 
 ----------------------------------------------------------------------
-Ran 50 tests in 12.132s
+Ran 50 tests in 10.312s
 
 OK
 ```
