@@ -2,8 +2,17 @@ import os
 import shutil
 from typing import Dict, Any, Optional
 
+# Safety margin promised in the README: free space must cover the peak need
+# plus 5% (filesystem overhead, ffmpeg temp, moov rewrite for +faststart).
+SAFETY_RATIO = 0.05
+# While an HLS VOD is merged, the .ts segments AND the final MP4 exist at the
+# same time -> the peak need is ~2x the stream size.
+DOWNLOAD_PEAK_FACTOR = 2.0
+
+
 def format_bytes(bytes_val: int) -> str:
     """Format bytes into readable string (B, KB, MB, GB, TB)."""
+    bytes_val = int(bytes_val or 0)
     if bytes_val < 1024:
         return f"{bytes_val} B"
     elif bytes_val < 1024 * 1024:
@@ -14,6 +23,7 @@ def format_bytes(bytes_val: int) -> str:
         return f"{bytes_val / (1024 * 1024 * 1024):.2f} GB"
     else:
         return f"{bytes_val / (1024 * 1024 * 1024 * 1024):.2f} TB"
+
 
 class DiskManager:
     def __init__(self, target_dir: Optional[str] = None):
@@ -33,10 +43,10 @@ class DiskManager:
         check_path = os.path.abspath(path or self.target_dir)
         if not os.path.exists(check_path):
             os.makedirs(check_path, exist_ok=True)
-            
+
         usage = shutil.disk_usage(check_path)
         drive = self.get_drive(check_path)
-        
+
         used_pct = round((usage.used / usage.total) * 100, 1) if usage.total > 0 else 0.0
         free_pct = round((usage.free / usage.total) * 100, 1) if usage.total > 0 else 0.0
 
@@ -56,35 +66,55 @@ class DiskManager:
             "free_pct": free_pct
         }
 
+    @staticmethod
+    def required_with_margin(required_bytes: int, peak_factor: float = 1.0,
+                             safety_ratio: float = SAFETY_RATIO, already_present_bytes: int = 0) -> int:
+        """Bytes that must be free: peak need (e.g. segments + MP4) + safety
+        margin, minus what is already on disk from a resumed download."""
+        req = max(0, int(required_bytes or 0))
+        peak = int(req * max(1.0, float(peak_factor or 1.0)))
+        need = int(peak * (1.0 + max(0.0, float(safety_ratio or 0.0))))
+        return max(0, need - max(0, int(already_present_bytes or 0)))
+
     def check_space(
         self,
         required_bytes: int,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        peak_factor: float = 1.0,
+        safety_ratio: float = SAFETY_RATIO,
+        already_present_bytes: int = 0,
     ) -> Dict[str, Any]:
         """
-        Check if target disk has enough free space for the video.
-        Requires exactly the video size without any extra buffers.
+        Check if the target disk has enough free space.
+
+        required_bytes  - size of the video itself;
+        peak_factor     - how many copies exist at the peak (HLS merge = 2.0);
+        safety_ratio    - extra margin (README: 5%);
+        already_present_bytes - bytes of segments already downloaded (resume).
         """
         disk_info = self.get_disk_info(path)
         free_bytes = disk_info["free_bytes"]
-        
-        is_enough = free_bytes >= required_bytes
-        shortage_bytes = max(0, required_bytes - free_bytes)
+        required_bytes = max(0, int(required_bytes or 0))
+        need = self.required_with_margin(required_bytes, peak_factor, safety_ratio, already_present_bytes)
+
+        is_enough = free_bytes >= need
+        shortage_bytes = max(0, need - free_bytes)
         remaining_after = max(0, free_bytes - required_bytes)
 
         if not is_enough:
             status = "INSUFFICIENT_SPACE"
             message = (
                 f"ОШИБКА: Недостаточно свободного места на диске {disk_info['drive']}! "
-                f"Требуется для видео: {format_bytes(required_bytes)}, "
-                f"свободно на диске: {format_bytes(free_bytes)}. "
-                f"Необходимо удалить файлы и освободить как минимум {format_bytes(shortage_bytes)} перед скачиванием!"
+                f"Видео: {format_bytes(required_bytes)}, нужно свободно на пике "
+                f"(с учётом сборки и запаса {int(safety_ratio * 100)}%): {format_bytes(need)}, "
+                f"свободно: {format_bytes(free_bytes)}. "
+                f"Освободите как минимум {format_bytes(shortage_bytes)} перед скачиванием!"
             )
         else:
             status = "ENOUGH_SPACE"
             message = (
                 f"Места достаточно. Свободно: {format_bytes(free_bytes)}, "
-                f"требуется для видео: {format_bytes(required_bytes)}. "
+                f"нужно на пике: {format_bytes(need)} (видео {format_bytes(required_bytes)}). "
                 f"После скачивания останется свободно: {format_bytes(remaining_after)}."
             )
 
@@ -96,6 +126,11 @@ class DiskManager:
             "path": disk_info["path"],
             "required_bytes": required_bytes,
             "required_formatted": format_bytes(required_bytes),
+            # peak need incl. safety margin (cli.py shows it as "с запасом")
+            "required_safety_bytes": need,
+            "required_safety_formatted": format_bytes(need),
+            "peak_factor": peak_factor,
+            "safety_ratio": safety_ratio,
             "free_bytes": free_bytes,
             "free_formatted": disk_info["free_formatted"],
             "total_bytes": disk_info["total_bytes"],
@@ -110,22 +145,11 @@ class DiskManager:
             "free_pct": disk_info["free_pct"]
         }
 
+
 if __name__ == "__main__":
     dm = DiskManager()
     info = dm.get_disk_info()
     print("Disk Info for:", info["drive"])
     print(f"Total: {info['total_formatted']} | Used: {info['used_formatted']} ({info['used_pct']}%) | Free: {info['free_formatted']} ({info['free_pct']}%)")
-    
-    # Test with 5 GB (typical 1080p stream)
-    test_5gb = 5 * 1024 * 1024 * 1024
-    res = dm.check_space(test_5gb)
-    print("\nCheck for 5 GB download:")
-    print("Is enough:", res["is_enough"])
-    print("Message:", res["message"])
-    
-    # Test with simulated 500 GB (force shortage check)
-    test_huge = 500 * 1024 * 1024 * 1024
-    res_huge = dm.check_space(test_huge)
-    print("\nCheck for 500 GB (simulated shortage):")
-    print("Is enough:", res_huge["is_enough"])
-    print("Message:", res_huge["message"])
+    res = dm.check_space(5 * 1024 ** 3, peak_factor=DOWNLOAD_PEAK_FACTOR)
+    print("\nCheck for 5 GB download (peak x2 + 5%):", res["is_enough"], "-", res["message"])

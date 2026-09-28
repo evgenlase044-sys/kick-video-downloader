@@ -6,6 +6,12 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from kick_extractor import HEADERS
 
+
+class HLSUnsupportedError(RuntimeError):
+    """The media playlist uses a feature the segment downloader cannot
+    reproduce faithfully (encryption, byte ranges, fMP4 init map...)."""
+
+
 def format_size(bytes_val: int) -> str:
     """Format bytes into readable string (B, KB, MB, GB)."""
     if bytes_val < 1024:
@@ -17,61 +23,108 @@ def format_size(bytes_val: int) -> str:
     else:
         return f"{bytes_val / (1024 * 1024 * 1024):.2f} GB"
 
+
+_ATTR_RE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
+
+
+def _attrs(line: str) -> Dict[str, str]:
+    body = line.split(":", 1)[1] if ":" in line else ""
+    return {k: v.strip('"') for k, v in _ATTR_RE.findall(body)}
+
+
+def parse_media_playlist(content: str, base_url: str) -> Dict[str, Any]:
+    """Parse an HLS *media* playlist.
+
+    Returns {"segments": [{"url", "duration", "discontinuity"}], "total",
+    "discontinuities", "map", "encrypted", "byterange", "endlist"}.
+    Unlike the old parser, only URI lines that follow #EXTINF are segments;
+    EXT-X-MAP / EXT-X-KEY / EXT-X-BYTERANGE / EXT-X-DISCONTINUITY are
+    recognised instead of being silently mis-read.
+    """
+    text = (content or "").lstrip("\ufeff")
+    if "#EXTM3U" not in text[:64]:
+        raise HLSUnsupportedError("Ответ не похож на HLS-плейлист (#EXTM3U отсутствует)")
+    if "#EXT-X-STREAM-INF" in text:
+        raise HLSUnsupportedError("Передан master-плейлист, нужен плейлист конкретного качества")
+    segs: List[Dict[str, Any]] = []
+    total = 0.0
+    pending_dur: Optional[float] = None
+    pending_disc = False
+    disc_count = 0
+    init_map = None
+    encrypted = False
+    byterange = False
+    endlist = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#EXTINF:"):
+            m = re.match(r"#EXTINF:\s*([0-9.]+)", line)
+            pending_dur = float(m.group(1)) if m else 0.0
+        elif line.startswith("#EXT-X-DISCONTINUITY") and not line.startswith("#EXT-X-DISCONTINUITY-SEQUENCE"):
+            pending_disc = True
+            disc_count += 1
+        elif line.startswith("#EXT-X-KEY"):
+            method = _attrs(line).get("METHOD", "NONE").upper()
+            if method != "NONE":
+                encrypted = True
+        elif line.startswith("#EXT-X-MAP"):
+            uri = _attrs(line).get("URI")
+            if uri:
+                init_map = urllib.parse.urljoin(base_url, uri)
+        elif line.startswith("#EXT-X-BYTERANGE"):
+            byterange = True
+        elif line.startswith("#EXT-X-ENDLIST"):
+            endlist = True
+        elif line.startswith("#"):
+            continue
+        else:
+            if pending_dur is None:
+                # URI without #EXTINF is not a media segment (old bug: it was)
+                continue
+            segs.append({"url": urllib.parse.urljoin(base_url, line),
+                         "duration": pending_dur, "discontinuity": pending_disc})
+            total += pending_dur
+            pending_dur, pending_disc = None, False
+    return {"segments": segs, "total": total, "discontinuities": disc_count, "map": init_map,
+            "encrypted": encrypted, "byterange": byterange, "endlist": endlist}
+
+
+def ensure_downloadable(info: Dict[str, Any]) -> None:
+    if info.get("encrypted"):
+        raise HLSUnsupportedError("Плейлист зашифрован (EXT-X-KEY): посегментная загрузка не поддерживается")
+    if info.get("byterange"):
+        raise HLSUnsupportedError("Плейлист с EXT-X-BYTERANGE пока не поддерживается загрузчиком")
+    if info.get("map"):
+        raise HLSUnsupportedError("fMP4-плейлист (EXT-X-MAP) пока не поддерживается загрузчиком")
+    if not info.get("segments"):
+        raise HLSUnsupportedError("В плейлисте нет сегментов")
+
+
 class SizeCalculator:
     def __init__(self, headers: Optional[Dict[str, str]] = None):
         self.headers = headers or dict(HEADERS)
+        self.last_playlist: Dict[str, Any] = {}
+
+    def _load(self, playlist_url: str) -> Dict[str, Any]:
+        req = urllib.request.Request(playlist_url, headers=self.headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content = resp.read().decode("utf-8", errors="replace")
+        info = parse_media_playlist(content, playlist_url)
+        ensure_downloadable(info)
+        self.last_playlist = info
+        return info
 
     def fetch_playlist_segments(self, playlist_url: str) -> Tuple[List[str], float]:
-        """
-        Download sub-playlist M3U8 and extract list of segment URLs and total duration.
-        """
-        req = urllib.request.Request(playlist_url, headers=self.headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            content = resp.read().decode("utf-8", errors="replace")
-
-        segments = []
-        total_duration = 0.0
-        current_dur = 0.0
-
-        for line in content.splitlines():
-            line = line.strip()
-            if line.startswith("#EXTINF:"):
-                m = re.search(r'#EXTINF:([0-9.]+)', line)
-                if m:
-                    current_dur = float(m.group(1))
-                    total_duration += current_dur
-            elif line and not line.startswith("#"):
-                seg_url = urllib.parse.urljoin(playlist_url, line)
-                segments.append(seg_url)
-
-        return segments, total_duration
+        """Segment URLs + total duration of a media playlist."""
+        info = self._load(playlist_url)
+        return [s["url"] for s in info["segments"]], info["total"]
 
     def fetch_playlist_segments_detailed(self, playlist_url: str) -> Tuple[List[Tuple[str, float]], float]:
-        """
-        Same as fetch_playlist_segments but keeps per-segment durations.
-        Returns ([(url, duration_sec)], total_duration_sec).
-        """
-        req = urllib.request.Request(playlist_url, headers=self.headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            content = resp.read().decode("utf-8", errors="replace")
-
-        detailed: List[Tuple[str, float]] = []
-        total_duration = 0.0
-        current_dur = 0.0
-
-        for line in content.splitlines():
-            line = line.strip()
-            if line.startswith("#EXTINF:"):
-                m = re.search(r'#EXTINF:([0-9.]+)', line)
-                if m:
-                    current_dur = float(m.group(1))
-            elif line and not line.startswith("#"):
-                seg_url = urllib.parse.urljoin(playlist_url, line)
-                detailed.append((seg_url, current_dur))
-                total_duration += current_dur
-                current_dur = 0.0
-
-        return detailed, total_duration
+        """Same as fetch_playlist_segments but keeps per-segment durations."""
+        info = self._load(playlist_url)
+        return [(s["url"], s["duration"]) for s in info["segments"]], info["total"]
 
     @staticmethod
     def slice_range(
@@ -86,10 +139,14 @@ class SizeCalculator:
         precisely post-trim with ``start_time - range_start_actual`` offset.
         """
         total = sum(d for _, d in detailed)
+        if start_time is None or end_time is None:
+            raise ValueError("Нужны и начало, и конец фрагмента")
+        if start_time < 0 or end_time <= start_time:
+            raise ValueError("Некорректный диапазон: 0 ≤ начало < конец")
+        if start_time >= total:
+            raise ValueError("Начало фрагмента за пределами видео")
         start = max(0.0, start_time)
         end = min(total, end_time)
-        if end <= start:
-            raise ValueError("Пустой диапазон: конец должен быть позже начала")
         urls: List[str] = []
         range_dur = 0.0
         range_start = 0.0
@@ -126,33 +183,28 @@ class SizeCalculator:
         sample_count: int = 15
     ) -> Dict[str, Any]:
         """
-        Calculate required disk space for a stream.
-        Combines segment sampling (HEAD requests) with bitrate calculation.
+        ESTIMATE the required disk space for a stream: HEAD-samples up to
+        `sample_count` segments and extrapolates (it is not an exact size).
         """
-        segments = []
+        segments: List[str] = []
         exact_duration = 0.0
         try:
             segments, exact_duration = self.fetch_playlist_segments(playlist_url)
-        except Exception as e:
-            # Fallback if sub-playlist cannot be downloaded
+        except Exception:
             pass
 
         dur = exact_duration if exact_duration > 0 else fallback_duration
         bitrate_size_bytes = int((bandwidth * dur) / 8) if (bandwidth and dur) else 0
 
-        # Sample segments if available
         sampled_sizes = []
         if segments:
             total_segs = len(segments)
-            indices = []
             if total_segs <= sample_count:
                 indices = list(range(total_segs))
             else:
                 step = total_segs / sample_count
                 indices = [int(i * step) for i in range(sample_count)]
-
             sample_urls = [segments[idx] for idx in indices]
-
             with ThreadPoolExecutor(max_workers=min(10, len(sample_urls))) as pool:
                 futures = {pool.submit(self._get_segment_size, u): u for u in sample_urls}
                 for fut in as_completed(futures):
@@ -186,16 +238,18 @@ class SizeCalculator:
             "bitrate_mbps": bitrate_mbps,
             "bitrate_formatted": bitrate_formatted,
             "method": method,
-            "sample_count_used": len(sampled_sizes)
+            "is_estimate": True,
+            "sample_count_used": len(sampled_sizes),
+            "discontinuities": (self.last_playlist or {}).get("discontinuities", 0),
         }
+
 
 if __name__ == "__main__":
     from kick_extractor import KickExtractor
     ext = KickExtractor()
     info = ext.extract("https://kick.com/jesusavgn/videos/01a0c558-1fd0-7b89-bc86-e5e39b939572")
-    calc = SizeCalculator()
+    calc = SizeCalculator(headers=ext.get_size_headers() if hasattr(ext, "get_size_headers") else None)
     print("Video:", info["title"], "Duration:", info["duration_str"])
-    print("\nCalculating sizes for all available qualities:")
     for q in info["qualities"]:
         res = calc.calculate_stream_size(q["playlist_url"], q["bandwidth"], info["duration"])
-        print(f"[{q['label']}] {q['resolution']} @ {q['fps']}fps: {res['formatted_size']} ({res['segments_count']} segments, method={res['method']})")
+        print(f"[{q['label']}] {q['resolution']} @ {q['fps']}fps: ~{res['formatted_size']} ({res['segments_count']} segments, method={res['method']})")
