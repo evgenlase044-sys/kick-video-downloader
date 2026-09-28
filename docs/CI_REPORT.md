@@ -51,7 +51,7 @@ web/index.html: {'skipped': 2, 'already': 3}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-28T05:36:12Z, 0bfbe97)
+# CI report (2026-09-28T05:37:10Z, 73f372a)
 
 ### ✅ python compile
 ```
@@ -134,9 +134,9 @@ test_fps_override_and_ntsc (studio.tests.test_export_pipeline.ArgvRewriteTest.te
 test_intermediate_is_near_lossless (studio.tests.test_export_pipeline.ArgvRewriteTest.test_intermediate_is_near_lossless) ... ok
 test_seek_audit (studio.tests.test_export_pipeline.ArgvRewriteTest.test_seek_audit) ... ok
 test_canvas_layer_replaces_ass_text (studio.tests.test_export_pipeline.ExportWrapperTest.test_canvas_layer_replaces_ass_text) ... ok
-test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x55d432916680] Impossible to open '/tmp/tmpqbark0dh/ovjob/000000.png'
-[in#1 @ 0x55d43290bdc0] Error opening input: No such file or directory
-Error opening input file /tmp/tmpqbark0dh/ovjob/list.ffconcat.
+test_fallback_to_ass_when_overlay_fails (studio.tests.test_export_pipeline.ExportWrapperTest.test_fallback_to_ass_when_overlay_fails) ... [studio] canvas text layer failed (overlay ffmpeg rc=254: [concat @ 0x55fcf7d01680] Impossible to open '/tmp/tmpb8ssd215/ovjob/000000.png'
+[in#1 @ 0x55fcf7cf6dc0] Error opening input: No such file or directory
+Error opening input file /tmp/tmpb8ssd215/ovjob/list.ffconcat.
 Error opening input files: No such file or directory
 ), falling back to ASS
 ok
@@ -155,7 +155,7 @@ test_gl_lens_shader_has_no_debug_output (studio.tests.test_pr7.Pr7PatchesTest.te
 test_server_patches (studio.tests.test_pr7.Pr7PatchesTest.test_server_patches) ... ok
 
 ----------------------------------------------------------------------
-Ran 35 tests in 9.609s
+Ran 35 tests in 9.592s
 
 OK
 ```
@@ -290,6 +290,11 @@ overlay_export selftest: OK
 ```
 
 ### ✅ node --check web/core/text/canvasText.js
+```
+
+```
+
+### ✅ node --check web/core/render/glPasses.js
 ```
 
 ```
