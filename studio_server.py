@@ -4,7 +4,9 @@
 Loads server.py with the audit fixes, installs the security layer, binds to
 127.0.0.1 only with a per-launch token (written to .studio/token, printed as
 a ready URL; the page keeps it in an HttpOnly SameSite=Strict cookie).
-Also mounts the moment finder and templates API (/api/studio/*).
+Also mounts the moment finder and templates API (/api/studio/*) and the
+export pipeline (studio/export_pipeline.py: canvas text layer, NVENC /
+platform bitrates, template fps, 16-bit grade, consistent loudness).
 """
 import argparse
 import ipaddress
@@ -46,6 +48,11 @@ def main(argv=None):
     if failed:
         print("[studio] WARNING: required server.py fixes failed to apply: " +
               ", ".join(r["id"] for r in failed), flush=True)
+    try:
+        from studio import export_pipeline
+        export_pipeline.install(server)
+    except Exception as exc:          # the legacy export keeps working without it
+        print(f"[studio] WARNING: export pipeline not installed: {exc}", flush=True)
     from studio.app import install
     hosts = ["127.0.0.1", "localhost", "::1"] + ([a.host] if a.allow_remote else [])
     info = install(server.app, token=token, port=a.port, web_dir=server.WEB_DIR, sfx_dir=server.SFX_DIR,
