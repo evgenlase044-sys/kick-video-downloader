@@ -3111,28 +3111,15 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
                 f"[{tag_prefix}v{fi}b][{tag_prefix}v{fi}z]overlay=x='{ox}':y='{oy}':eval=frame,"
                 f"setsar=1[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
+            # studio:zoom-mblur - trail only while the punch moves
+            _zb0, _zb1 = _studio.zoom_blur_window(s0, e0)
+            _mb, curr_v = _studio.motion_blur_parts(curr_v, f"{tag_prefix}v{fi}z", _zb0, _zb1)
+            filter_parts.extend(_mb)
         elif fx.kind == "lens":
-            # studio:lens-anim - animated Lens Punch (§13.3). lenscorrection
-            # options are init-only, so the old code held one static barrel for
-            # the whole interval. k1 now follows the preview bell (canvasMonitor:
-            # peak at 32 % of the interval, width 0.35) in 6 enable-gated steps;
-            # the CA shift follows k1.
-            k1p = max(-0.45, min(0.45, float(fx.peak or 0.12)))
-            steps = 6
-            for si in range(steps):
-                t0 = s0 + d * si / steps
-                t1 = e0 if si == steps - 1 else s0 + d * (si + 1) / steps
-                pm = (si + 0.5) / steps
-                k = k1p * (2.718281828459045 ** (-((pm - 0.32) / 0.35) ** 2))
-                if abs(k) < 0.004:
-                    continue
-                sen = f"'gte(t,{t0:.3f})*lt(t,{t1:.3f})'"
-                shift = max(1, int(round(abs(k) * 12)))
-                lbl = f"[{tag_prefix}v{fi}l{si}]"
-                filter_parts.append(
-                    f"{curr_v}lenscorrection=k1={k:.4f}:k2=0:cx=0.5:cy=0.5:enable={sen},"
-                    f"rgbashift=rh={shift}:bh=-{shift}:enable={sen}{lbl}")
-                curr_v = lbl
+            # studio:lens-v2 (supersedes studio:lens-anim) - lens.js kernel,
+            # auto-overscan, YUV chroma shift; enable-gated steps. See studio/fx_extra.py
+            _lp, curr_v = _studio.lens_punch_parts(curr_v, f"{tag_prefix}v{fi}", s0, e0, fx.peak, out_w, out_h)
+            filter_parts.extend(_lp)
         elif fx.kind == "threshold":
             # §15 threshold hit: hard luma gate + noise dither, 1-2 frames
             th = int(16 + (fx.peak if fx.peak is not None else 0.45) * 219)
@@ -3158,6 +3145,9 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             filter_parts.append(
                 f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
             curr_v = f"[{tag_prefix}v{fi}]"
+            # studio:whip-mblur - directional smear across the whip
+            _mb, curr_v = _studio.motion_blur_parts(curr_v, f"{tag_prefix}v{fi}w", s0, e0, 6)
+            filter_parts.extend(_mb)
         elif fx.kind in ("ramp", "freeze"):
             # time-remap lives in the new renderer (Composition §8.3); the
             # transition path logs and skips instead of producing garbage.
@@ -3596,7 +3586,7 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
 
     # ── TV color grade on the full composite ──
     if tv:
-        filter_parts.extend(_tv_grade_parts(comp, "[graded]", is_vertical=(out_w < out_h)))
+        filter_parts.extend(_studio.grade_bands(_tv_grade_parts, comp, "[graded]", out_w, out_h, _studio.split_top_h(locals())))  # studio:grade-bands-layered
         comp = "[graded]"
 
     # ── static cinematic frames (рамки сверху/снизу) ──
@@ -4121,7 +4111,7 @@ def export_clip_pack(req: ExportPackRequest):
 
         # ── TV color grade (after join so both halves glow uniformly) ──
         if tv:
-            filter_parts.extend(_tv_grade_parts(curr_v, "[graded]", is_vertical=(out_w < out_h)))
+            filter_parts.extend(_studio.grade_bands(_tv_grade_parts, curr_v, "[graded]", out_w, out_h, _studio.split_top_h(locals())))  # studio:grade-bands-pack
             curr_v = "[graded]"
 
         # ── Facecam PIP removed: the webcam band already shows the face,
@@ -4473,7 +4463,7 @@ def preview_frame(req: dict):
 
         # TV grade + bloom
         if use_tv:
-            fp.extend(_tv_grade_parts(comp, "[graded]", is_vertical=(W < H)))
+            fp.extend(_studio.grade_bands(_tv_grade_parts, comp, "[graded]", W, H, _studio.split_top_h(locals())))  # studio:grade-bands-preview
             comp = "[graded]"
 
         # субтитры: установившееся состояние (всё допечатано)
