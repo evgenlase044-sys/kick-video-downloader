@@ -180,6 +180,7 @@ def targets():
     from studio.server_patches import SERVER_PATCHES
     from studio.web_patches import EDITOR_PATCHES, INDEX_PATCHES
     import studio.pr8_patches  # noqa: F401  (PR #8: appended to the lists above in place)
+    import studio.pr9_patches  # noqa: F401  (PR #9: appended after PR #8)
     return [("server.py", SERVER_PATCHES),
             (os.path.join("web", "editor.js"), EDITOR_PATCHES),
             (os.path.join("web", "index.html"), INDEX_PATCHES)]

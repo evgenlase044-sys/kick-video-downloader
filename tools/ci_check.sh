@@ -11,7 +11,6 @@ run() {
 }
 echo "# CI report ($(date -u +%Y-%m-%dT%H:%M:%SZ), $(git rev-parse --short HEAD 2>/dev/null))"
 echo
-[ -f tools/probe.sh ] && bash tools/probe.sh
 run "python compile" python -m compileall -q server.py studio_server.py cli.py downloader.py size_calculator.py disk_manager.py kick_extractor.py studio
 run "anchored patches (server.py / editor.js / index.html)" python -m studio.patching
 run "python regression tests" python -m unittest discover -s studio/tests -t . -v
