@@ -34,6 +34,7 @@ EDITOR_PATCHES = [
 INDEX_PATCHES = [
     # §2 unreachable browser exporter: frozen, not loaded
     Patch(id="drop-dead-exporter", required=False, regex=True, count=0,
+          guard=lambda src: "core/render/exporter.js" in src,
           old=r"[ \t]*<script[^>]*src=[\"'][^\"']*core/render/exporter\.js[^\"']*[\"'][^>]*>\s*</script>[ \t]*\r?\n?",
           new=""),
     Patch(id="timeremap-script", required=False, regex=True, count=1,

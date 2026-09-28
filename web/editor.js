@@ -601,6 +601,9 @@
                 body: JSON.stringify({ filename })
             });
             if (res.ok) {
+                if (window.__canvasMonitor && typeof window.__canvasMonitor.dropMedia === "function") {
+                    try { window.__canvasMonitor.dropMedia(filename); } catch (_) {}
+                }
                 fetchLibrary();
             }
         } catch (e) {
@@ -988,14 +991,14 @@
             if (state.selectedClipId && clips.some(c => c.id === state.selectedClipId)) {
                 state.selectedClipId = null;
             }
+            selectClip(state.selectedClipId);
+            recalcTotalDuration();
             renderTracksDOM();
+            renderTimeline();
+            syncVideoToCurrentTime();
+            renderCutsTree();
+            saveProject();
         });
-        selectClip(state.selectedClipId);
-        recalcTotalDuration();
-        renderTimeline();
-        syncVideoToCurrentTime();
-        renderCutsTree();
-        saveProject();
     }
 
     // Transcribe Track Select Sync
@@ -1552,6 +1555,7 @@
             renderTimeline();
             renderCutsTree();
             syncVideoToCurrentTime();
+            saveProject();
             void upEvent;
         }
 
@@ -1834,6 +1838,12 @@
             pipBoxFor(clip) { return pipForClip(clip); },
             trackBoxFor(clip, t) {
                 return clip.trackPath && clip.trackPath.length ? trackPosAt(clip, t) : null;
+            },
+            faceAnchor(baseClip, t) {
+                if (!baseClip) return null;
+                const box = baseClip.trackPath && baseClip.trackPath.length ? trackPosAt(baseClip, t) : null;
+                if (!box) return null;
+                return [box.x + box.w / 2, box.y + box.h / 2];
             },
             cueAt(t) {
                 const clip = currentCueClip(t);
@@ -3566,6 +3576,8 @@
             return { items, skipped };
         }
         // §7.4/§7.6: очередь экспорта — пакет уходит в фон, редактор остаётся живым
+        // studio:tdz-exportPackBtn - declared before its first use
+        const exportPackBtn = document.getElementById("exportPackBtn");
         const queueExportBtn = document.createElement("button");
         queueExportBtn.id = "exportQueueBtn";
         queueExportBtn.className = (exportPackBtn && exportPackBtn.className) || "btn";
@@ -3625,7 +3637,13 @@
                 }
             };
             queueES.onerror = () => {
+                // studio:queue-sse-reconnect
                 if (queueES) { queueES.close(); queueES = null; }
+                setTimeout(() => {
+                    fetch("/api/export-queue/status").then(r => r.json()).then(st => {
+                        if (st && st.running && !queueES) listenExportQueue();
+                    }).catch(() => {});
+                }, 1500);
             };
         }
         // если очередь уже крутится (перезагрузка страницы) — подключаемся снова
@@ -3635,7 +3653,7 @@
 
         // Batch Pack highlights
         const addHighlightBtn = document.getElementById("addHighlightToPackBtn");
-        const exportPackBtn = document.getElementById("exportPackBtn");
+        // (exportPackBtn is declared above - studio:tdz-late-removed)
 
         if (addHighlightBtn) {
             addHighlightBtn.title = "Создать нарезку от плейхеда (то же, что + Нарезка на таймлайне)";
@@ -6098,6 +6116,72 @@
             });
         }
     };
+
+    // ── Studio Integrations (§2 & §6 Moments / Templates / Seek / Transcript) ──
+    window.studioSeek = seekTo;
+
+    Object.defineProperty(window, "studioTranscriptWords", {
+        get() {
+            if (state._lastTranscribe && Array.isArray(state._lastTranscribe.words) && state._lastTranscribe.words.length) {
+                return state._lastTranscribe.words;
+            }
+            const tId = textTrackId();
+            const clips = state.tracks[tId] || [];
+            const words = [];
+            for (const c of clips) {
+                if (Array.isArray(c.words)) words.push(...c.words);
+            }
+            return words.length ? words : null;
+        },
+        configurable: true
+    });
+
+    window.studioAddFx = function(fxList, baseTime = 0) {
+        if (!Array.isArray(fxList) || !fxList.length) return;
+        const tid = ensureFxTrack();
+        ensureTracksInitialized();
+        for (const f of fxList) {
+            const start = baseTime + (f.start || 0);
+            const dur = Math.max(0.05, (f.end != null ? (f.end - f.start) : (f.duration || 0.35)));
+            const c = {
+                id: "fx_" + Math.random().toString(36).slice(2, 9),
+                trackId: tid,
+                startTime: Math.max(0, start),
+                duration: dur,
+                sourceOffset: 0,
+                sourceDuration: dur,
+                title: "",
+                isFx: true,
+                fxKind: f.kind || "flash",
+                fxColor: f.color || "white",
+                fxPeak: f.amp != null ? f.amp : (f.peak != null ? f.peak : 0.75),
+                fxSound: f.sfx || f.fxSound || "none",
+                fxGain: 1.0,
+                fxBarH: 160,
+                fxAmp: (f.amp ? Math.round(f.amp * 100) : 12),
+                fxFreq: 7,
+                media: null,
+                volume: 1.0,
+                opacity: 1.0
+            };
+            if (f.anchor) c.anchor = f.anchor;
+            c.title = fxLabel(c);
+            (state.tracks[tid] = state.tracks[tid] || []).push(c);
+        }
+        state.tracks[tid].sort((a, b) => a.startTime - b.startTime);
+        recalcTotalDuration();
+        renderTimeline();
+        saveProject();
+    };
+
+    document.addEventListener("studio:template-plan", (e) => {
+        const plan = e.detail;
+        if (plan && Array.isArray(plan.fx) && plan.fx.length) {
+            const base = (plan.moment && typeof plan.moment.start === "number") ? plan.moment.start : state.currentTime;
+            window.studioAddFx(plan.fx, base);
+            showToast(`Шаблон «${plan.template || ""}»: добавлено ${plan.fx.length} эффектов на таймлайн`, "ok");
+        }
+    });
 
 })();
 

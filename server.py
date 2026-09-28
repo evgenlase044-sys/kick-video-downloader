@@ -18,6 +18,7 @@ from kick_extractor import KickExtractor
 from size_calculator import SizeCalculator
 from disk_manager import DiskManager, format_bytes
 from downloader import KickDownloader, sanitize_filename
+import studio.server_hooks as _studio  # studio:hooks-import
 
 # Ensure clean UTF-8 console output
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -94,7 +95,7 @@ def server_version() -> dict:
     except Exception:
         pass
     try:
-        mtime = int(os.path.getmtime(os.path.join(BASE_DIR, "server.py")) * 1000)
+        mtime = _studio.code_mtime_ms(BASE_DIR)  # studio:version-mtime
     except Exception:
         mtime = 0
     return {
@@ -236,6 +237,7 @@ def probe_video(req: ProbeRequest):
             if item["size"]["bitrate_kbps"] == max_bitrate and len(qualities_with_size) > 1 and item != qualities_with_size[0]:
                 item["is_source"] = True
 
+    _studio.remember_playlists(qualities_with_size)  # studio:ssrf-remember
     return {
         "url": video_info["url"],
         "title": video_info["title"],
@@ -263,7 +265,7 @@ def _run_download_task(req: DownloadRequest, segments: list):
             download_state["title"] = req.title
             download_state["quality_label"] = req.quality_label
 
-    downloader = KickDownloader(output_dir=DOWNLOADS_DIR)
+    downloader = KickDownloader(output_dir=DOWNLOADS_DIR, headers=_studio.download_headers(extractor))  # studio:cookies-download
     with state_lock:
         current_downloader = downloader
         download_state["status"] = "downloading"
@@ -340,11 +342,12 @@ def start_download(req: DownloadRequest):
         if download_state["status"] in ("downloading", "merging"):
             raise HTTPException(status_code=409, detail="Уже выполняется загрузка другого видео.")
 
+    _studio.validate_download_request(req)  # studio:ssrf-guard
     # 1. Resolve segment list: whole VOD or [start_time, end_time) slice
     want_range = req.start_time is not None and req.end_time is not None
     try:
         if want_range:
-            detailed, _ = calculator.fetch_playlist_segments_detailed(req.playlist_url)
+            detailed, _ = _studio.size_calculator(extractor, calculator).fetch_playlist_segments_detailed(req.playlist_url)  # studio:cookies-range
             segments, range_dur, total_dur, range_start = SizeCalculator.slice_range(
                 detailed, req.start_time, req.end_time
             )
@@ -359,7 +362,7 @@ def start_download(req: DownloadRequest):
                     1024, int(req.required_bytes * (range_dur / total_dur))
                 )
         else:
-            segments, _ = calculator.fetch_playlist_segments(req.playlist_url)
+            segments, _ = _studio.size_calculator(extractor, calculator).fetch_playlist_segments(req.playlist_url)  # studio:cookies-full
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -369,7 +372,7 @@ def start_download(req: DownloadRequest):
         raise HTTPException(status_code=400, detail="Суб-плейлист не содержит сегментов для скачивания.")
 
     # 2. STRICT DISK SPACE VALIDATION (fragment-aware)
-    space_check = disk_manager.check_space(req.required_bytes)
+    space_check = disk_manager.check_space(req.required_bytes, peak_factor=_studio.DOWNLOAD_PEAK_FACTOR)  # studio:disk-peak
     if not space_check["is_enough"]:
         raise HTTPException(
             status_code=400,
@@ -433,7 +436,8 @@ async def progress_stream():
         while True:
             with state_lock:
                 data = dict(download_state)
-            yield f"data: {json.dumps({'type': 'progress', **snap}, ensure_ascii=False)}\n\n"
+            # studio:progress-nameerror (was **snap -> NameError)
+            yield f"data: {json.dumps({'type': 'progress', **data}, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0.5)
 
     return StreamingResponse(
@@ -480,6 +484,8 @@ def probe_media_file(video_path: str) -> Dict[str, Any]:
     width = 1920
     height = 1080
     fps = 60
+    fps_exact = 60.0  # studio:fps-exact-init
+    fps_rational = "60/1"
     try:
         cmd = [
             "ffprobe", "-v", "quiet", "-print_format", "json",
@@ -495,10 +501,8 @@ def probe_media_file(video_path: str) -> Dict[str, Any]:
                     width = int(stream.get("width") or 1920)
                     height = int(stream.get("height") or 1080)
                     r_frame_rate = stream.get("r_frame_rate", "60/1")
-                    if "/" in r_frame_rate:
-                        num, den = r_frame_rate.split("/")
-                        if int(den) > 0:
-                            fps = round(int(num) / int(den))
+                    fps_exact, fps_rational = _studio.stream_fps(stream)  # studio:fps-exact-probe
+                    fps = int(round(fps_exact))
                     break
     except Exception as e:
         print(f"Error probing {video_path}: {e}")
@@ -507,7 +511,9 @@ def probe_media_file(video_path: str) -> Dict[str, Any]:
         "duration_str": format_duration_str(duration),
         "width": width,
         "height": height,
-        "fps": fps
+        "fps": fps,
+        "fps_exact": fps_exact,  # studio:fps-exact-return
+        "fps_rational": fps_rational,
     }
 
 class ImportMediaRequest(BaseModel):
@@ -641,6 +647,10 @@ SFX_FILES = {
     "laugh_big": "laugh_big.mp3",
     "levelup": "level_complete.mp3",
     "coin": "coin_win.mp3",
+    # studio:sfx-aliases
+    "whoosh_magic": "whoosh_magic.mp3",
+    "hit_small": "hit_small.mp3",
+    "riser": "riser.mp3",
 }
 SFX_LABELS = {
     "click": "Щелчок камеры", "camera_click": "Щелчок камеры", "click_hard": "Жёсткий щелчок",
@@ -652,6 +662,7 @@ SFX_LABELS = {
     "cheer": "Улюлюкания толпы", "cheer_big": "Рёв толпы (победа)",
     "applause": "Овации", "laugh": "Смех толпы", "laugh_big": "Громкий смех",
     "levelup": "Левел-ап", "coin": "Монетка",
+    "whoosh_magic": "Магия-спаркл", "hit_small": "Удар", "riser": "Райзер (нарастание)",  # studio:sfx-labels
 }
 
 @app.get("/api/sfx/list")
@@ -756,7 +767,7 @@ def stream_media_file(file: str, request: Request):
 @app.post("/api/media/import")
 def import_media(req: ImportMediaRequest):
     """Import an existing video from local path into the library."""
-    src = req.path.strip().strip('"').strip("'")
+    src = _studio.check_import_path(req.path)  # studio:import-guard
     if not os.path.exists(src) or not os.path.isfile(src):
         raise HTTPException(status_code=400, detail="Указанный файл не существует")
 
@@ -1067,10 +1078,8 @@ def transcribe_media(req: TranscribeRequest):
     base_name = os.path.basename(req.filename)
     file_path = os.path.join(DOWNLOADS_DIR, base_name)
     if not os.path.exists(file_path):
-        if os.path.exists(req.filename):
-            file_path = req.filename
-        else:
-            raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
+        # studio:no-abs-paths-file (only files inside downloads/)
+        raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
 
     if not GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="GROQ_API_KEY не задан в .env или переменных окружения")
@@ -1081,7 +1090,7 @@ def transcribe_media(req: TranscribeRequest):
     prompt = req.prompt or DEFAULT_SPEECH_PROMPT
     model = req.model or "whisper-large-v3-turbo"
 
-    temp_id = int(time.time() * 1000)
+    temp_id = _studio.unique_id()  # studio:asr-tempid
     temp_audio = os.path.join(DOWNLOADS_DIR, f"temp_transcribe_{temp_id}.flac")
     try:
         _extract_asr_audio(file_path, start, dur, temp_audio)
@@ -1170,7 +1179,7 @@ def transcribe_media(req: TranscribeRequest):
             for w in merged if w["end"] > w["start"]
         ]
         # words shorter than 2 frames at 60 fps are unusable
-        clean_words = [w for w in clean_words if (w["end"] - w["start"]) >= 0.02 or w["end"] > w["start"]]
+        clean_words = _studio.enforce_min_word_duration(clean_words, 2.0 / 60.0)  # studio:asr-shortwords
 
         segments = build_segments_from_words(clean_words, base_offset=0.0)
         full_text = " ".join(w["word"] for w in clean_words).strip()
@@ -1620,10 +1629,8 @@ def track_object(req: TrackRequest):
     base_name = os.path.basename(req.filename)
     file_path = os.path.join(DOWNLOADS_DIR, base_name)
     if not os.path.exists(file_path):
-        if os.path.exists(req.filename):
-            file_path = req.filename
-        else:
-            raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
+        # studio:no-abs-paths-file (only files inside downloads/)
+        raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
 
     # legacy single-box API -> new target/zone contract
     if req.target is None and req.x is not None:
@@ -1675,10 +1682,8 @@ def make_proxy(req: ProxyRequest):
     base_name = os.path.basename(req.filename)
     src = os.path.join(DOWNLOADS_DIR, base_name)
     if not os.path.exists(src):
-        if os.path.exists(req.filename):
-            src = req.filename
-        else:
-            raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
+        # studio:no-abs-paths-src (only files inside downloads/)
+        raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
     os.makedirs(PROXIES_DIR, exist_ok=True)
     out = os.path.join(PROXIES_DIR, os.path.splitext(base_name)[0] + "_proxy.mp4")
     if os.path.exists(out) and os.path.getsize(out) > 44:
@@ -1710,10 +1715,8 @@ def waveform(req: WaveformRequest):
     base_name = os.path.basename(req.filename)
     src = os.path.join(DOWNLOADS_DIR, base_name)
     if not os.path.exists(src):
-        if os.path.exists(req.filename):
-            src = req.filename
-        else:
-            raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
+        # studio:no-abs-paths-src (only files inside downloads/)
+        raise HTTPException(status_code=404, detail=f"Медиафайл {base_name} не найден")
     n = max(50, min(4000, int(req.points or 600)))
     af = f"aresample=8000,aformat=channel_layouts=mono"
     cmd = ["ffmpeg", "-loglevel", "error", "-ss", str(max(0.0, req.start))]
@@ -1755,7 +1758,8 @@ def format_export_name(template: str, ctx: Dict[str, Any]) -> str:
     return out.strip(". ") or "short"
 
 class ExportQueueRequest(BaseModel):
-    clips: List[ExportClipItem]
+    # studio:queue-forward-ref (ExportClipItem is defined further below)
+    clips: List[Dict[str, Any]]
     name_template: str = "{channel}_{date}_{n}_{title}"
 
 _export_queue_lock = threading.Lock()
@@ -1799,7 +1803,7 @@ def export_queue_enqueue(req: ExportQueueRequest):
         if _export_queue_state.get("running"):
             raise HTTPException(status_code=409, detail="Очередь уже выполняется")
         start = len(_export_queue_state["results"])
-        for i, clip in enumerate(req.clips):
+        for i, clip in enumerate(_studio.parse_queue_clips(req.clips, ExportClipItem)):  # studio:queue-parse
             _export_queue.append({"index": start + i, "clip": clip,
                                   "name_template": req.name_template})
         _export_queue_state.update({
@@ -1877,86 +1881,12 @@ def get_grade_lut():
 # ── §17.2 WebSocket render: Electron draws frames, server pipes rawvideo → x264 ──
 @app.websocket("/ws/render/{job_id}")
 async def ws_render(ws: WebSocket, job_id: str):
-    """
-    PLAN §17.2: the renderer sends a header {w,h,fps,frames,audio_wav,out},
-    then raw yuv420p frames (w*h*1.5 bytes each). Frames stream into
-    ffmpeg rawvideo → libx264 slow CRF16 (+ AAC audio when audio_wav given,
-    two-pass loudnorm already applied by the caller). Every 4 frames an
-    {ack:n} credit comes back; the client keeps ≤ 8 unacked frames.
-    """
-    await ws.accept()
-    hdr = await ws.receive_json()
-    w = int(hdr["w"]); h = int(hdr["h"]); fps = int(hdr["fps"])
-    frames_total = int(hdr["frames"])
-    audio_wav = hdr.get("audio_wav") or ""
-    out = hdr["out"]
-    out_path = os.path.join(EXPORTED_PACKS_DIR, os.path.basename(out))
-    os.makedirs(EXPORTED_PACKS_DIR, exist_ok=True)
-    ffmpeg_cmd = ["ffmpeg", "-y", "-loglevel", "error",
-                  "-f", "rawvideo", "-pix_fmt", "yuv420p",
-                  "-s", f"{w}x{h}", "-r", str(fps), "-i", "pipe:0"]
-    if audio_wav and os.path.exists(audio_wav):
-        ffmpeg_cmd += ["-i", audio_wav, "-map", "0:v", "-map", "1:a",
-                       "-c:a", "aac", "-b:a", "320k", "-ar", "48000"]
-    else:
-        ffmpeg_cmd += ["-an"]
-    ffmpeg_cmd += [
-        "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-tune", "film",
-        "-profile:v", "high", "-level", "4.2",
-        "-x264-params", "aq-mode=3:deblock=-1,-1",
-        "-g", str(fps * 2), "-pix_fmt", "yuv420p",
-        "-colorspace", "bt709", "-color_primaries", "bt709",
-        "-color_trc", "bt709", "-color_range", "tv",
-        "-movflags", "+faststart", "-map_metadata", "-1", out_path,
-    ]
-    # Windows: Proactor loop supports subprocess pipes for asyncio
-    proc = await asyncio.create_subprocess_exec(
-        *ffmpeg_cmd,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE)
-    n = 0
-    rc = -1
-    err_tail = ""
-    try:
-        frame_bytes = w * h * 3 // 2
-        while n < frames_total:
-            data = await ws.receive_bytes()
-            if len(data) != frame_bytes:
-                await ws.send_json({"error": f"frame {n}: got {len(data)} bytes, expected {frame_bytes}"})
-                break
-            proc.stdin.write(data)
-            await proc.stdin.drain()
-            n += 1
-            if n % 4 == 0 or n == frames_total:
-                await ws.send_json({"ack": n})
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        try: await ws.send_json({"error": str(e)})
-        except Exception: pass
-    finally:
-        try:
-            proc.stdin.close()
-        except Exception:
-            pass
-        rc = await proc.wait()
-        if proc.stderr:
-            try:
-                err_tail = (await proc.stderr.read())[-400:].decode("utf-8", "replace")
-            except Exception:
-                err_tail = ""
-        done = (rc == 0 and n >= frames_total and os.path.exists(out_path))
-        try:
-            await ws.send_json({"done": done, "frames": n, "returncode": rc,
-                                "file": os.path.basename(out_path) if done else None,
-                                "stderr": err_tail})
-        except Exception:
-            pass
-        await ws.close()
+    """PLAN §17.2 raw-frame render. studio:ws-render - see studio/render_ws.py."""
+    await _studio.ws_render(ws, job_id, exported_dir=EXPORTED_PACKS_DIR,
+                            downloads_dir=DOWNLOADS_DIR)
 
 
-# ── Channel presets: manual webcam/content/layout/style per channel (PLAN §9.4) ──
+# Channel presets: manual webcam/content/layout/style per channel (PLAN §9.4)
 PRESETS_DIR = os.path.join(BASE_DIR, "presets", "channels")
 
 class ChannelPresetRequest(BaseModel):
@@ -3188,12 +3118,12 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             prg = f"((t-{s0:.3f})/{max(1e-3, d):.3f})"
             pc = f"max(0{BS},min(1{BS},{prg}))"
             ease = f"({pc}*{pc}*(3-2*{pc}))"
-            shift = f"{dirn}*0.35*iw*{ease}"
+            shift = f"{dirn}*0.25*iw*{ease}"  # studio:whip-clamp
             filter_parts.append(
                 f"{curr_v}split=2[{tag_prefix}v{fi}a][{tag_prefix}v{fi}b]")
             filter_parts.append(
                 f"[{tag_prefix}v{fi}b]scale=iw*2:ih,"
-                f"crop=w=iw/2:h=ih:x='(iw-iw/2)/2+({shift})':y=0,"
+                f"crop=w=iw/2:h=ih:x='max(0{BS},min(iw/2{BS},(iw-iw/2)/2+({shift})))':y=0,"  # studio:whip-clamp-x
                 f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}s]")
             filter_parts.append(
                 f"[{tag_prefix}v{fi}a][{tag_prefix}v{fi}s]overlay=x=0:y=0:enable={en}[{tag_prefix}v{fi}]")
@@ -3201,8 +3131,9 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
         elif fx.kind in ("ramp", "freeze"):
             # time-remap lives in the new renderer (Composition §8.3); the
             # transition path logs and skips instead of producing garbage.
-            print(f"[fx] kind={fx.kind} skipped in transition path (needs renderer)")
-            continue
+            # studio:fx-timeremap - rendered in the filtergraph (video only)
+            _tr_parts, curr_v = _studio.fx_time_remap(fx.kind, curr_v, f"{tag_prefix}v{fi}", s0, e0)
+            filter_parts.extend(_tr_parts)
         elif fx.kind == "bars":
             bh = max(20, min(out_h // 3, int(fx.bar_h or 120)))
             prog = f"min(1,min(t-{s0:.3f},{e0:.3f}-t)/0.35)"
@@ -4017,6 +3948,8 @@ def export_clip_pack(req: ExportPackRequest):
             if os.path.exists(bg_candidate):
                 bg_path = bg_candidate
 
+        tv = getattr(clip, "color_grade", "none") == "tv"
+
         inputs: List[str] = []
         filter_parts: List[str] = []
         seg_labels = []
@@ -4377,7 +4310,10 @@ def export_clip_pack(req: ExportPackRequest):
             filter_parts.append("".join(audio_seg_labels) + f"concat=n={n_seg}:v=0:a=1,loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
             audio_map = "[aout]"
         else:
-            filter_parts.append("0:a?loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
+            if _source_has_audio(source_path):
+                filter_parts.append("[0:a]loudnorm=I=-14:TP=-1.0:LRA=11,alimiter=limit=-1.0dB:attack=5:release=50[aout]")
+            else:
+                filter_parts.append(f"anullsrc=r=48000:cl=stereo:d={total_dur:.3f}[aout]")
             audio_map = "[aout]"
 
         # Construct full FFmpeg command

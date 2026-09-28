@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GL equivalence test</title>
+<script src="../timeMap.js"></script>
+<script src="effects.js"></script>
+<script src="lens.js"></script>
+<script src="glPasses.js"></script>
+</head>
+<body>
+<script>
+"use strict";
+(function () {
+    const out = { ok: false, jfa: null, kawase: null, lens: null, error: null };
+    try {
+        const E = window.CoreEffects, L = window.CoreLens, GLP = window.CoreGLPasses;
+        if (!E || !L || !GLP) throw new Error("modules missing");
+
+        // ── 1) JFA stroke: 64x64 deterministic mask ─────────────────────
+        const W1 = 64, H1 = 64, mask = new Uint8Array(W1 * H1);
+        let seed = 7;
+        function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+        for (let i = 0; i < 6; i++) mask[Math.floor(rnd() * W1 * H1)] = 255;
+        const radius = 3.0;
+        const jsAlpha = new Float32Array(W1 * H1);
+        const dist = E.jumpFlood(mask, W1, H1);
+        for (let i = 0; i < W1 * H1; i++) jsAlpha[i] = E.strokeAlpha(dist[i], radius);
+        const gpuAlpha = new GLP.StrokePass(W1, H1).run(mask, radius);
+        let jfaDiff = 0;
+        for (let i = 0; i < W1 * H1; i++) jfaDiff = Math.max(jfaDiff, Math.abs(jsAlpha[i] - gpuAlpha[i]));
+        let fs0 = -1;
+        for (let i = 0; i < W1 * H1; i++) if (mask[i]) { fs0 = i; break; }
+        console.error('[dbg] jfa seed', fs0 % W1, Math.floor(fs0 / W1),
+            'js@seed', jsAlpha[fs0].toFixed(3), 'gpu@seed', gpuAlpha[fs0].toFixed(3),
+            'js@n', jsAlpha[fs0 + 1].toFixed(3), 'gpu@n', gpuAlpha[fs0 + 1].toFixed(3));
+        out.jfa = jfaDiff;
+
+        // ── 2) dual-Kawase: 32x32 impulse ────────────────────────────────
+        const W2 = 32, H2 = 32, imp = new Float32Array(W2 * H2);
+        imp[16 * W2 + 16] = 255;
+        const jsK = E.kawaseBlur(imp, W2, H2, 2);
+        const gpuK = new GLP.KawasePass(W2, H2).run(imp, 2);
+        let kDiff = 0;
+        for (let i = 0; i < W2 * H2; i++) kDiff = Math.max(kDiff, Math.abs(jsK[i] - gpuK[i]));
+        out.kawase = kDiff;
+
+        // ── 3) lens + CA + wave: 64x64 gradient RGBA ─────────────────────
+        const W3 = 64, H3 = 64;
+        const img = new Uint8Array(W3 * H3 * 4);
+        for (let y = 0; y < H3; y++) for (let x = 0; x < W3; x++) {
+            const i = (y * W3 + x) * 4;
+            img[i] = Math.round(255 * x / (W3 - 1));
+            img[i + 1] = Math.round(255 * y / (H3 - 1));
+            img[i + 2] = 128; img[i + 3] = 255;
+        }
+        // bilinear sampler matching OpenGL LINEAR filtering (texel = u*W-0.5)
+        function sampleBilinear(u, v) {
+            const fx = Math.max(0, Math.min(W3 - 1 - 1e-6, u * W3 - 0.5));
+            const fy = Math.max(0, Math.min(H3 - 1 - 1e-6, v * H3 - 0.5));
+            const x0 = Math.floor(fx), y0 = Math.floor(fy);
+            const x1 = Math.min(W3 - 1, x0 + 1), y1 = Math.min(H3 - 1, y0 + 1);
+            const wx = fx - x0, wy = fy - y0;
+            const c = (xx, yy, ch) => img[(yy * W3 + xx) * 4 + ch];
+            const r = c(x0, y0, 0) * (1 - wx) + c(x1, y0, 0) * wx;
+            const g = c(x0, y0, 1) * (1 - wx) + c(x1, y0, 1) * wx;
+            const b = c(x0, y0, 2) * (1 - wx) + c(x1, y0, 2) * wx;
+            return [r / 255, g / 255, b / 255];
+        }
+        const params = { k1: 0.18, k2: 0.02, ca: 3, cx: 0.5, cy: 0.5, W: 1080, H: 1920,
+                         A: 2, f: 6, v: 1.5, t: 0.3 };
+        const gpuImg = new GLP.LensPass(W3, H3).run(img, params);
+        let lDiff = 0;
+        for (let y = 1; y < H3 - 1; y++) for (let x = 1; x < W3 - 1; x++) {
+            const u = (x + 0.5) / W3, v = (y + 0.5) / H3;
+            const m = L.mapPoint(u, v, params, params.t);
+            const r = sampleBilinear(m.r.u, m.r.v);
+            const g = sampleBilinear(m.g.u, m.g.v);
+            const b = sampleBilinear(m.b.u, m.b.v);
+            const gi = (y * W3 + x) * 4;
+            lDiff = Math.max(lDiff,
+                Math.abs(r[0] * 255 - gpuImg[gi]) / 255,
+                Math.abs(g[1] * 255 - gpuImg[gi + 1]) / 255,
+                Math.abs(b[2] * 255 - gpuImg[gi + 2]) / 255);
+        }
+        {
+            const u = 32.5 / W3, v = 32.5 / H3;
+            const m = L.mapPoint(u, v, params, params.t);
+            const gi = (32 * W3 + 32) * 4;
+            console.error('[dbg] mapPt r(', m.r.u.toFixed(4), m.r.v.toFixed(4), ') g(', m.g.u.toFixed(4), m.g.v.toFixed(4), ')');
+            console.error('[dbg] gpu rgb =', gpuImg[gi], gpuImg[gi + 1], gpuImg[gi + 2]);
+        }
+        out.lens = lDiff;
+        out.ok = true;
+    } catch (e) {
+        out.error = String(e && e.message || e);
+    }
+    console.log("GLTEST:" + JSON.stringify(out));
+})();
+</script>
+</body>
+</html>
