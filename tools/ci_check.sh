@@ -22,4 +22,5 @@ run "overlay export selftest" node web/studio/selftest_overlay.js
 for f in web/editor.js web/app.js web/studio/moments.js web/studio/overlay_export.js web/core/canvasMonitor.js web/core/text/canvasText.js; do
   [ -f "$f" ] && run "node --check $f" node --check "$f"
 done
+if [ -f tools/ci_probe.sh ]; then echo "## Probe"; bash tools/ci_probe.sh; fi
 exit $fail
