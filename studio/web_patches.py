@@ -51,4 +51,10 @@ INDEX_PATCHES = [
           old=r"(?=</body>)",
           new="<script src=\"studio/moments.js\"></script><!-- studio:moments-panel -->\n",
           marker="studio:moments-panel"),
+    # §2 one text renderer: canvas text layer for the export, key words, emoji,
+    # export templates, Backspace guard (web/studio/overlay_export.js)
+    Patch(id="overlay-export", required=False, regex=True, count=1,
+          old=r"(?=</body>)",
+          new="<script src=\"studio/overlay_export.js\"></script><!-- studio:overlay-export -->\n",
+          marker="studio:overlay-export"),
 ]
