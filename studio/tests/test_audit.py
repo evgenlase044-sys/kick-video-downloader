@@ -36,7 +36,12 @@ class HlsParserTest(unittest.TestCase):
         self.assertEqual(info["discontinuities"], 1)
         self.assertTrue(info["segments"][1]["discontinuity"])
         ensure_downloadable(info)
-        enc = parse_media_playlist("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXTINF:2,\na.ts\n", "https://h/")
+        # PR #10: AES-128 is downloadable now (studio/tests/test_pr10.py downloads it for real);
+        # DRM-like schemes (SAMPLE-AES) are still rejected with a clear message
+        aes = parse_media_playlist("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXTINF:2,\na.ts\n", "https://h/")
+        ensure_downloadable(aes)
+        self.assertTrue(aes["encrypted"])
+        enc = parse_media_playlist("#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"k\"\n#EXTINF:2,\na.ts\n", "https://h/")
         with self.assertRaises(HLSUnsupportedError):
             ensure_downloadable(enc)
         with self.assertRaises(HLSUnsupportedError):

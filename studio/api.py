@@ -1,4 +1,5 @@
-"""Studio API routes: moment finder + templates (audit §6, §7 step 3/4)."""
+"""Studio API routes: moment finder + templates (audit §6, §7 step 3/4)
++ live chat recording to JSONL (PR #10, feeds the moment finder)."""
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,15 @@ class PlanRequest(BaseModel):
     template: str = "hype"
     beats: List[Dict[str, Any]] = Field(default_factory=list)
     face: Optional[Dict[str, float]] = None
+
+
+class ChatRecordRequest(BaseModel):
+    channel: str                              # slug or kick.com/<slug>
+    chatroom_id: Optional[int] = None         # skip the channel API lookup
+
+
+class ChatStopRequest(BaseModel):
+    id: str
 
 
 def probe_duration(path: str) -> float:
@@ -86,5 +96,29 @@ def build_router(downloads_dir: str) -> APIRouter:
             return {"template": req.template, "fx": T.plan_effects(req.template, req.beats, req.face)}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
+
+    # ── PR #10: live chat -> downloads/chat_<slug>_<time>.jsonl ──────────
+    @r.post("/api/studio/chat/record")
+    def chat_record(req: ChatRecordRequest):
+        import chat_recorder as CR
+        try:
+            slug = CR.slug_from(req.channel)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        rid, rec = CR.start_recording(slug, downloads_dir, chatroom_id=req.chatroom_id)
+        return {"id": rid, "file": os.path.basename(rec.out_path), "status": rec.status()}
+
+    @r.post("/api/studio/chat/stop")
+    def chat_stop(req: ChatStopRequest):
+        import chat_recorder as CR
+        st = CR.stop_recording(req.id)
+        if st is None:
+            raise HTTPException(status_code=404, detail="Запись чата не найдена")
+        return {"id": req.id, "status": st}
+
+    @r.get("/api/studio/chat/status")
+    def chat_status():
+        import chat_recorder as CR
+        return {"recordings": CR.recordings_status()}
 
     return r
