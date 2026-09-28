@@ -1,4 +1,4 @@
-# Smoke Test Log (PR #7 / PR #8)
+# Smoke Test Log (PR #7 / PR #8 / PR #9)
 
 Дата: 2026-09-28
 Окружение: Windows 11, Python 3.12, ffmpeg, Chrome / Electron Browser Subagent, Local Server (`127.0.0.1:8765`).
@@ -23,7 +23,7 @@
 
 ## 2. Лог запуска сервера (studio_server / server.py)
 ```text
-[studio] server.py patches: {'already': 30, 'skipped': 1}
+[studio] server.py patches: {'already': 36, 'skipped': 1}
 [studio] export pipeline: {'grade': True, 'encoder_shim': True, 'export_route': True, 'loudness_gate': True}
 [studio] web/index.html patches: {'skipped': 2, 'already': 3}
 [studio] UI: http://127.0.0.1:8765/index.html?token=NIiWhNB6Ybt-0vQwDd1Uh3uno1EmShto1MEZvTUd_FM
@@ -52,7 +52,7 @@ INFO:     127.0.0.1:52562 - "POST /api/preview-frame HTTP/1.1" 200 OK
 
 ---
 
-## 3. Проверка тестов регрессии (45 тестов, 0 ошибок)
+## 3. Проверка тестов регрессии (50 тестов, 0 ошибок)
 ```text
 test_peak_and_safety (studio.tests.test_audit.DiskManagerTest.test_peak_and_safety) ... ok
 test_server_patch_signature (studio.tests.test_audit.DiskManagerTest.test_server_patch_signature) ... ok
@@ -99,21 +99,32 @@ test_lens_punch_is_animated (studio.tests.test_pr8.Pr8ExportFxTest.test_lens_pun
 test_mixed_chain_renders (studio.tests.test_pr8.Pr8ExportFxTest.test_mixed_chain_renders) ... ok
 test_zoom_anchor_moves_the_punch (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_anchor_moves_the_punch) ... ok
 test_zoom_really_zooms_only_inside_its_window (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_really_zooms_only_inside_its_window) ... ok
+test_grade_bands_renders (studio.tests.test_pr9.Pr9FxTest.test_grade_bands_renders) ... ok
+test_lens_and_blur_only_touch_their_window (studio.tests.test_pr9.Pr9FxTest.test_lens_and_blur_only_touch_their_window) ... ok
+test_lens_params_match_lens_js (studio.tests.test_pr9.Pr9FxTest.test_lens_params_match_lens_js) ... ok
+test_lens_parts_have_overscan_and_no_rgbashift (studio.tests.test_pr9.Pr9FxTest.test_lens_parts_have_overscan_and_no_rgbashift) ... ok
+test_split_top_h (studio.tests.test_pr9.Pr9FxTest.test_split_top_h) ... ok
 
 ----------------------------------------------------------------------
-Ran 45 tests in 25.609s
+Ran 50 tests in 23.969s
 
 OK
 ```
 
 ---
 
-## 4. Результаты проверок в браузере (PR #8)
-1. **Hoisting коллекторов региона:**
+## 4. Результаты проверок PR #8 / PR #9
+1. **Hoisting коллекторов региона (PR #8):**
    `collectRegionSubtitles`, `collectRegionTextItems`, `collectRegionFx` доступны из `requestServerPreviewFrame` без `ReferenceError`.
-2. **Серверный кадр превью:**
+2. **Серверный кадр превью (PR #8):**
    Вызов `/api/preview-frame` возвращает HTTP 200, кадр отрисовывается в `<img>`, утечки blob-URL устранены.
-3. **Хук `faceAnchor`:**
+3. **Хук `faceAnchor` (PR #8):**
    Возвращает нормализованный `{ x, y }` в пределах 0.15..0.85 (предотвращает появление `NaN` в матрице трансформации `canvasMonitor`).
-4. **Удаление `tidOfFx`:**
+4. **Удаление `tidOfFx` (PR #8):**
    Мёртвый код удален, глобальная область чистая.
+5. **Lens Punch v2 (PR #9):**
+   Экспортная линза теперь использует формулу из `lens.js`, auto-overscan (без затемненных углов) и `chromashift` вместо `rgbashift`.
+6. **Motion blur (PR #9):**
+   Динамическое субкадровое накопление на зумах и whip-переходах, действующее строго в интервале движения.
+7. **Раздельный грейд полос (PR #9):**
+   Полосы вебки и геймплея в `split_adhd` грейдятся независимо с защитой оттенков кожи на лице.
