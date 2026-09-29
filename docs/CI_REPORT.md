@@ -68,7 +68,7 @@ web/index.html: {'already': 5, 'skipped': 1}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-29T10:14:09Z, 186784e)
+# CI report (2026-09-29T14:38:50Z, daf8bec)
 
 ### ✅ python compile
 ```
@@ -198,7 +198,7 @@ You can install this with:
 
 
 ----------------------------------------------------------------------
-Ran 71 tests in 14.672s
+Ran 77 tests in 14.904s
 
 FAILED (errors=2)
 ```
@@ -218,7 +218,7 @@ FAILED (errors=2)
 
 ### ✅ studio API exposes chat recording (PR #10)
 ```
-['/api/platform/policy', '/api/studio/chat/record', '/api/studio/chat/status', '/api/studio/chat/stop', '/api/studio/moments', '/api/studio/moments/feedback', '/api/studio/templates', '/api/studio/templates/plan']
+['/api/platform/policy', '/api/studio/chat/record', '/api/studio/chat/status', '/api/studio/chat/stop', '/api/studio/discipline/analyze', '/api/studio/discipline/music', '/api/studio/discipline/plan', '/api/studio/discipline/stills', '/api/studio/moments', '/api/studio/moments/feedback', '/api/studio/templates', '/api/studio/templates/plan']
 ```
 
 ### ✅ web core selftest
@@ -316,7 +316,7 @@ overlay_export selftest: OK
 ```
 npm warn exec The following package was not found and will be installed: electron@41.7.1
 npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
-[5494:0929/101431.399932:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/chrome-sandbox is owned by root and has mode 4755.
+[5559:0929/143913.157985:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/chrome-sandbox is owned by root and has mode 4755.
 /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/electron exited with signal SIGTRAP
 ```
 
