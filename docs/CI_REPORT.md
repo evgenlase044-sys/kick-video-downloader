@@ -68,7 +68,7 @@ web/index.html: {'already': 5, 'skipped': 1}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-29T08:28:15Z, b392733)
+# CI report (2026-09-29T10:14:09Z, 186784e)
 
 ### ✅ python compile
 ```
@@ -198,7 +198,7 @@ You can install this with:
 
 
 ----------------------------------------------------------------------
-Ran 71 tests in 15.647s
+Ran 71 tests in 14.672s
 
 FAILED (errors=2)
 ```
@@ -316,7 +316,7 @@ overlay_export selftest: OK
 ```
 npm warn exec The following package was not found and will be installed: electron@41.7.1
 npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
-[5526:0929/082839.194764:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/chrome-sandbox is owned by root and has mode 4755.
+[5494:0929/101431.399932:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/chrome-sandbox is owned by root and has mode 4755.
 /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/electron exited with signal SIGTRAP
 ```
 
