@@ -2294,6 +2294,9 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             # offset that keeps the fx anchor (template face anchor, 0..1 of the
             # output; default centre) fixed, clamped so no edge ever shows.
             # Same envelope as before (and as the preview curve).
+            # studio:face-anchor-split-server - anchor in clip.face_anchor_split
+            # is already mapped to output uv; if present via extra fields on FxOverlay
+            # we keep it, otherwise fall back to anchor_x/anchor_y as given.
             a = max(0.02, min(0.5, float(fx.peak if fx.peak and fx.peak < 1 else 0.15)))
             ax = getattr(fx, "anchor_x", None)
             ay = getattr(fx, "anchor_y", None)

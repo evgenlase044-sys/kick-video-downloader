@@ -177,11 +177,19 @@ EDITOR_PATCHES = [
 ]
 
 INDEX_PATCHES = [
-    # §2 unreachable browser exporter: frozen, not loaded
+    # §2 browser exporter: load exporter.js as ES-adjacent UMD before overlay_export
+    # (draw-list -> YUV -> WS render, verify_all §7.4 gate). Guard declines if
+    # already present; otherwise inject before studio/moments.js.
     Patch(id="drop-dead-exporter", required=False, regex=True, count=0,
-          guard=lambda src: "core/render/exporter.js" in src,
-          old=r"[ \t]*<script[^>]*src=[\"'][^\"']*core/render/exporter\.js[^\"']*[\"'][^>]*>\s*</script>[ \t]*\r?\n?",
-          new=""),
+          guard=lambda src: "core/render/exporter.js" not in src,
+          old=r"(?=<script[^>]*src=[\"']studio/moments\.js)",
+          new="<script src=\"core/render/exporter.js\"></script><!-- studio:exporter-script -->\n",
+          marker="studio:exporter-script"),
+    Patch(id="glpasses-script", required=False, regex=True, count=1,
+          guard=lambda src: "core/render/glPasses.js" not in src,
+          old=r"(?=<script[^>]*src=[\"']core/render/exporter\.js)",
+          new="<script src=\"core/render/glPasses.js\"></script><!-- studio:glpasses-script -->\n",
+          marker="studio:glpasses-script"),
     Patch(id="timeremap-script", required=False, regex=True, count=1,
           old=r"(?=<script[^>]*src=[\"'][^\"']*core/canvasMonitor\.js)",
           new="<script src=\"core/timeRemap.js\"></script><!-- studio:timeremap-script -->\n    ",

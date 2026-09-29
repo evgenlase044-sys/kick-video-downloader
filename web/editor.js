@@ -1764,8 +1764,23 @@
         if (monitorCurrentTc) monitorCurrentTc.textContent = tc;
     }
 
-    // Multi-layer preview: bottom video track fullscreen + top video track PiP overlay
+     // Multi-layer preview: bottom video track fullscreen + top video track PiP overlay
     // + simultaneous audio mix across ALL audio tracks. Elements are pooled dynamically.
+    // studio:audio-master-clock - WebAudio master clock for drift-free preview.
+    let _audioCtx = null, _masterClock = null;
+    function ensureAudioClock() {
+        if (_masterClock) return _masterClock;
+        try {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return null;
+            _audioCtx = new AC();
+            if (_audioCtx.state === "suspended") _audioCtx.resume().catch(function(){});
+            if (window.CoreTimeMap && window.CoreTimeMap.makeAudioClock) {
+                _masterClock = window.CoreTimeMap.makeAudioClock(_audioCtx);
+            }
+        } catch(e) {}
+        return _masterClock;
+    }
     let overlayVideoEl = null, masterGain = 1.0;
     const audioEls = {}; // trackId -> <audio>
     function activeClipOn(trackId, t) {
@@ -1853,6 +1868,23 @@
                     const mh = Number(m.height || m.h || (videoEl && videoEl.videoHeight)) || 1080;
                     fx_ /= mw; fy_ /= mh;
                 }
+                // studio:face-anchor-split - For split_adhd the face box is in
+                // SOURCE coordinates (full frame) while the zoom is applied to the
+                // OUTPUT canvas 1080x1920 where the face sits inside the TOP band
+                // 1080x864 (cropBox -> top). Map SOURCE center -> OUTPUT uv:
+                //   x_out = (fx_src - cropBox.x)/cropBox.w  (0..1 full width)
+                //   y_out = (fy_src - cropBox.y)/cropBox.h * (topH / outH)
+                // Cover-fit aspect mismatch is second order for the anchor (face
+                // is near the crop centre) so linear mapping is sufficient.
+                if (state.clipper.format === "split_adhd" && state.clipper.cropBox) {
+                    const cb = state.clipper.cropBox;
+                    const bw = Math.max(1e-6, cb.w), bh = Math.max(1e-6, cb.h);
+                    const nx = (fx_ - cb.x) / bw;
+                    const ny = (fy_ - cb.y) / bh;
+                    const outH = 1920, topH = Math.round(outH * 0.45 / 2) * 2;
+                    fx_ = nx;
+                    fy_ = ny * (topH / outH);
+                }
                 // keep the punch inside the frame even for a face at the very edge
                 return { x: Math.max(0.15, Math.min(0.85, fx_)), y: Math.max(0.15, Math.min(0.85, fy_)) };
             },
@@ -1881,16 +1913,24 @@
                     sizeRatio: 0.058 * (state.clipper.subSize || 1.0) * (isSplit ? 0.9 : 1.0)
                 };
             },
+            // studio:text-z-canvas - canvasMonitor needs z to decide under/over text
+            textZ(t) {
+                const idx = trackOrder().findIndex(function (tid) { const tr = getTrack(tid); return tr && tr.kind === "text"; });
+                return idx >= 0 ? idx : null;
+            },
             fxAt(t) {
                 const out = [];
-                for (const tid of videoTrackIds()) {
+                const order = trackOrder();
+                for (let zi = 0; zi < order.length; zi++) {
+                    const tid = order[zi];
                     for (const c of (state.tracks[tid] || [])) {
                         if (!c.isFx) continue;
                         out.push({
                             kind: c.fxKind || "flash", color: c.fxColor || "white",
                             peak: c.fxPeak != null ? c.fxPeak : 0.75,
                             amp: c.fxAmp || 12, freq: c.fxFreq || 7,
-                            start: c.startTime, end: c.startTime + c.duration
+                            start: c.startTime, end: c.startTime + c.duration,
+                            z: zi, anchor: c.anchor || null
                         });
                     }
                 }
@@ -2232,6 +2272,13 @@
         });
     }
 
+    // studio:audio-master-clock - wall clock + audio master correction
+    let _clockBase = 0, _clockStartPerf = 0;
+    function driveMasterClock() {
+        const mc = ensureAudioClock();
+        if (!mc) return null;
+        return mc;
+    }
     async function startPlayback() {
         if (state.isPlaying) return;
         state.isPlaying = true;
@@ -2252,6 +2299,11 @@
         });
         await waitSeeked([videoEl, overlayVideoEl, ...Object.values(audioEls)]);
 
+        // studio:audio-master-clock - seed from current playhead, audio clock drives it
+        _clockBase = state.currentTime;
+        _clockStartPerf = performance.now();
+        const mc = driveMasterClock();
+        if (mc) { try { /* prime clock */ mc(); } catch(e){} }
         state.lastFrameTime = performance.now();
         requestAnimationFrame(playbackLoop);
     }
@@ -2272,7 +2324,26 @@
     function playbackLoop(timestamp) {
         if (!state.isPlaying) return;
 
-        const deltaSec = (timestamp - state.lastFrameTime) / 1000;
+        // studio:audio-master-clock - if available, derive time from audio clock, else wall clock
+        let deltaSec;
+        const mc = _masterClock;
+        if (mc) {
+            try {
+                const masterElapsed = mc();
+                const want = _clockBase + masterElapsed;
+                // clamp jitter: don't jump more than 0.2s per frame
+                const diff = want - state.currentTime;
+                if (Math.abs(diff) > 0.2) deltaSec = diff;
+                else deltaSec = Math.max(0, Math.min(0.2, diff + (timestamp - state.lastFrameTime)/1000 * 0.15));
+                // blend: mostly audio clock, small wall contribution to avoid stalls
+                deltaSec = (want - state.currentTime) * 0.85 + (timestamp - state.lastFrameTime)/1000 * 0.15;
+                deltaSec = Math.max(0, Math.min(0.12, deltaSec));
+            } catch(e) {
+                deltaSec = (timestamp - state.lastFrameTime) / 1000;
+            }
+        } else {
+            deltaSec = (timestamp - state.lastFrameTime) / 1000;
+        }
         state.lastFrameTime = timestamp;
 
         state.currentTime += deltaSec;
@@ -3944,8 +4015,59 @@
                     freq: c.fxFreq || 7,
                     z: zi
                 };
-                // studio:fx-anchor-export - template face anchor (0..1 of the frame)
-                const an = c.anchor;
+                // studio:fx-anchor-export - template face anchor (0..1 of the frame).
+                // studio:face-anchor-split - If the punch carries a tracked face
+                // anchor via faceAnchor() (anchored zoom), prefer that resolved
+                // OUTPUT anchor (already split-mapped). Explicit c.anchor wins.
+                let _anchored = null;
+                if (c.fxKind === "zoom" && !c.anchor) {
+                    // anchor derived from the tracked face box on the BASE layer
+                    const base = resolvePackSource(r.startTime);
+                    if (base && base.mc) {
+                        try {
+                            const fa = state.clipper._lastFaceAnchor ||
+                                (function () {
+                                    const hk = window.__canvasMonitor && window.__canvasMonitor.hooks;
+                                    return hk && hk.faceAnchor ? hk.faceAnchor(base.mc, (c.startTime + c.duration / 2)) : null;
+                                })();
+                            if (fa && isFinite(Number(fa.x)) && isFinite(Number(fa.y))) _anchored = fa;
+                        } catch (e) {}
+                    }
+                    // fallback: compute from the base clip's tracked box directly
+                    if (!_anchored) {
+                        try {
+                            const baseClip = (() => {
+                                for (const tid of videoTrackIds()) {
+                                    for (const cl of (state.tracks[tid] || [])) {
+                                        if (!cl.isFx && cl.media && cl.trackPath && cl.trackPath.length) return cl;
+                                    }
+                                }
+                                return null;
+                            })();
+                            if (baseClip) {
+                                const mid = c.startTime + c.duration / 2;
+                                const box = trackPosAt(baseClip, mid);
+                                if (box) {
+                                    let fx_ = box.x + box.w / 2, fy_ = box.y + box.h / 2;
+                                    if (fx_ > 1.001 || fy_ > 1.001) {
+                                        const mw = Number(baseClip.media && (baseClip.media.width || baseClip.media.w)) || 1920;
+                                        const mh = Number(baseClip.media && (baseClip.media.height || baseClip.media.h)) || 1080;
+                                        fx_ /= mw; fy_ /= mh;
+                                    }
+                                    if (state.clipper.format === "split_adhd" && state.clipper.cropBox) {
+                                        const cb = state.clipper.cropBox;
+                                        const bw = Math.max(1e-6, cb.w), bh = Math.max(1e-6, cb.h);
+                                        const outH = 1920, topH = Math.round(outH * 0.45 / 2) * 2;
+                                        fx_ = (fx_ - cb.x) / bw;
+                                        fy_ = ((fy_ - cb.y) / bh) * (topH / outH);
+                                    }
+                                    _anchored = { x: Math.max(0.15, Math.min(0.85, fx_)), y: Math.max(0.15, Math.min(0.85, fy_)) };
+                                }
+                            }
+                        } catch (e2) {}
+                    }
+                }
+                const an = c.anchor || _anchored;
                 if (an && isFinite(Number(an.x)) && isFinite(Number(an.y))) {
                     ov.anchor_x = Math.max(0, Math.min(1, Number(an.x)));
                     ov.anchor_y = Math.max(0, Math.min(1, Number(an.y)));
@@ -5182,6 +5304,33 @@
         if (addTextTrackBtn) addTextTrackBtn.addEventListener("click", () => addTrack("text"));
         if (addFxBtn) addFxBtn.addEventListener("click", () => addFxClip("flash", "white"));
         if (addFxTrackBtn) addFxTrackBtn.addEventListener("click", addFxTrack);
+        // studio:stickers - hidden file input + button wiring (added dynamically if missing)
+        (function(){
+            let inp = document.getElementById("stickerFileInput");
+            if (!inp) {
+                inp = document.createElement("input");
+                inp.type = "file"; inp.id = "stickerFileInput";
+                inp.accept = "image/png,image/jpeg,image/webp,image/gif";
+                inp.style.display = "none";
+                document.body.appendChild(inp);
+                inp.addEventListener("change", function(){ if (inp.files && inp.files[0]) addStickerClip(inp.files[0]); inp.value = ""; });
+            }
+            let btn = document.getElementById("addStickerBtn");
+            if (!btn) {
+                const bar = document.querySelector(".layers-add-btns") || document.getElementById("trackHeadersList");
+                if (bar) {
+                    btn = document.createElement("button");
+                    btn.className = "layer-add-btn"; btn.id = "addStickerBtn";
+                    btn.title = "Добавить стикер-картинку (PNG/WebP) на таймлайн";
+                    btn.textContent = "+Стикер";
+                    btn.addEventListener("click", function(){ inp.click(); });
+                    // insert after +Текст
+                    const ref = document.getElementById("addTextClipBtn");
+                    if (ref && ref.parentElement === bar) ref.insertAdjacentElement("afterend", btn);
+                    else bar.appendChild(btn);
+                }
+            }
+        })();
     }
     // ── FX clips (вспышки / сужение границ / тряска): элементы на видеослоях ──
     const FX_DEFAULT_SOUND = { white: "camera_click", green: "approve", red: "cancel", bw: "whoosh_fast" };
@@ -5424,6 +5573,45 @@
         renderTimeline();
         saveProject();
         switchTab("inspector");
+    }
+    // studio:stickers - image sticker clip (PNG/WebP) with optional tracking path.
+    // Backend supports overlay_file + track_path in export; this wires the UI.
+    async function addStickerClip(file) {
+        if (!file) return;
+        const isImage = /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name || "");
+        if (!isImage) { showToast("Стикер — только картинка (PNG/WebP/JPG с прозрачностью)", "info"); return; }
+        try {
+            const fd = new FormData(); fd.append("file", file, file.name);
+            const r = await fetch("/api/media/upload", { method: "POST", body: fd });
+            if (!r.ok) throw new Error(await r.text());
+            const media = await r.json();
+            // place as overlay PiP on the topmost video track
+            const vids = videoTrackIds();
+            const tid = vids.length ? vids[0] : (ensureTracksInitialized(), videoTrackIds()[0]);
+            const clip = {
+                id: "sticker_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
+                trackId: tid,
+                startTime: Math.max(0, state.currentTime),
+                duration: 3.0,
+                sourceOffset: 0, sourceDuration: 3.0,
+                title: "🖼 " + (file.name || "стикер"),
+                media: media,
+                isPip: true,
+                pipBox: { x: 0.62, y: 0.62, w: 0.32 },
+                trackPath: null,
+                volume: 1.0, opacity: 1.0
+            };
+            (state.tracks[tid] = state.tracks[tid] || []).push(clip);
+            state.tracks[tid].sort(function(a,b){ return a.startTime - b.startTime; });
+            selectClip(clip.id);
+            recalcTotalDuration(); renderTimeline(); syncVideoToCurrentTime(); saveProject();
+            showToast("Стикер добавлен — тяни на мониторе, трекай в инспекторе", "ok");
+            // enable drag on monitor for stickers
+            setTimeout(function(){
+                const mon = document.getElementById("videoMonitor");
+                if (mon) mon.dispatchEvent(new Event("sticker-added"));
+            }, 60);
+        } catch(e) { showToast("Стикер: " + e.message, "err"); }
     }
     // «+Текст»: свободный текстовый элемент (не субтитры) с полными параметрами;
     // живёт на текстовом слое, но его можно перетащить на любой другой слой

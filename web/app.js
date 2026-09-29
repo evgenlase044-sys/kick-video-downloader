@@ -267,6 +267,65 @@ document.addEventListener("DOMContentLoaded", () => {
 
         videoDetailsSection.classList.remove("hidden");
         checkSelectedQualitySpace();
+        // studio:chat-live-button - show ● Чат for live streams (chat_recorder backend)
+        setupChatButton(data);
+    }
+
+    // studio:chat-live-button - minimal live chat recorder UI
+    let _chatRecId = null, _chatPoll = null;
+    function setupChatButton(data) {
+        let row = document.getElementById("chatRecRow");
+        const isLive = !!(data && (data.is_live || data.slug && !data.uuid));
+        // remove old row if not live anymore
+        if (!isLive && row) { row.remove(); return; }
+        if (!isLive) return;
+        // find slug from probe data or url
+        const slug = (data.slug || (data.url ? (data.url.match(/kick\.com\/([^\/]+)/i) || [])[1] : "" ) || "").replace(/\/.*/, "");
+        if (!slug) return;
+        if (!row) {
+            row = document.createElement("div");
+            row.id = "chatRecRow";
+            row.style.cssText = "display:flex;align-items:center;gap:8px;margin:10px 0;padding:8px 10px;background:#0f1419;border:1px solid #1f2a33;border-radius:8px;font:13px system-ui;";
+            const anchor = document.getElementById("startDownloadBtn");
+            if (anchor && anchor.parentElement) anchor.parentElement.insertBefore(row, anchor);
+            else if (videoDetailsSection) videoDetailsSection.appendChild(row);
+        }
+        if (_chatRecId) {
+            row.innerHTML = '<span style="color:#e11">● REC</span> <span id="chatRecInfo">запись чата...</span> <button id="chatStopBtn" style="margin-left:auto" class="btn-sm btn-secondary">Стоп</button>';
+            const stopBtn = document.getElementById("chatStopBtn");
+            if (stopBtn) stopBtn.onclick = async function() {
+                try { await fetch("/api/studio/chat/stop", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({id: _chatRecId})}); } catch(e){}
+                _chatRecId = null;
+                if (_chatPoll) { clearInterval(_chatPoll); _chatPoll = null; }
+                setupChatButton(data);
+                showToast("Запись чата остановлена", "info");
+            };
+            return;
+        }
+        const chatInfo = data.chatroom_id ? "чат доступен" : "чат канала";
+        row.innerHTML = '<button id="chatRecBtn" class="btn-sm btn-accent" title="Запись чата live-эфира в JSONL для автопоиска моментов">● Чат — запись</button> <span style="color:#8a9bb0;font-size:12px">' + chatInfo + '</span> <span id="chatRecStatus" style="margin-left:auto;color:#5a6a7a;font-size:12px"></span>';
+        const btn = document.getElementById("chatRecBtn");
+        if (btn) btn.onclick = async function() {
+            btn.disabled = true; btn.textContent = "● ...";
+            try {
+                const r = await fetch("/api/studio/chat/record", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({channel: slug})});
+                const j = await r.json();
+                if (!r.ok) throw new Error(j.detail || r.statusText);
+                _chatRecId = j.id;
+                showToast("Запись чата: " + (j.file || j.id), "ok");
+                setupChatButton(data);
+                // poll status for message count
+                _chatPoll = setInterval(async function(){
+                    try {
+                        const rs = await fetch("/api/studio/chat/status"); const js = await rs.json();
+                        const rec = (js.recordings || []).find(function(x){ return x.id === _chatRecId; });
+                        const el = document.getElementById("chatRecInfo");
+                        if (el && rec) el.textContent = (rec.messages || 0) + " сообщ. · " + (rec.file || "");
+                        if (!rec) { clearInterval(_chatPoll); _chatPoll = null; _chatRecId = null; setupChatButton(data); }
+                    } catch(e){}
+                }, 2500);
+            } catch(e) { showToast("Чат: " + e.message, "err"); btn.disabled = false; btn.textContent = "● Чат — запись"; }
+        };
     }
 
     // Space check: the SAME rule as the server (peak x2 + 5%), so the button
@@ -310,6 +369,8 @@ document.addEventListener("DOMContentLoaded", () => {
             startDownloadBtn.disabled = false;
             startDownloadBtn.style.opacity = "1";
             startDownloadBtn.title = `Начать скачивание (на пике сборки нужно ${formatBytesJs(needBytes)})`;
+            // restore normal label when enough space after previous shortage
+            updateDownloadBtnLabel();
         } else {
             legendRemainingSize.textContent = "0 B (Недостаточно!)";
             alertReq.textContent = `${formatBytesJs(reqBytes)} (на пике сборки ${formatBytesJs(needBytes)})`;
@@ -321,6 +382,10 @@ document.addEventListener("DOMContentLoaded", () => {
             startDownloadBtn.disabled = true;
             startDownloadBtn.style.opacity = "0.4";
             startDownloadBtn.title = `Необходимо освободить как минимум ${formatBytesJs(shortage)}`;
+            // studio:disk-peak-label - the blocked button itself must read "на пике сборки нужно ..."
+            if (downloadBtnText) {
+                downloadBtnText.textContent = `На пике сборки нужно ${formatBytesJs(needBytes)} — свободно ${currentDiskInfo.free_formatted}`;
+            }
         }
     }
 

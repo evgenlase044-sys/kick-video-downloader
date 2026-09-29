@@ -302,9 +302,26 @@
                     if (fa) anchor = fa;
                 }
             } else if (f.kind === "lens") {
-                const p = Math.max(0, Math.min(1, (t - a0) / Math.max(0.05, a1 - a0)));
-                const bell = p > 0 ? Math.exp(-Math.pow((p - 0.32) / 0.35, 2)) : 0;
-                scale = Math.max(scale, 1 + 0.5 * (f.amp != null ? f.amp : 0.18) * bell);
+                // studio:preview-lens-barrel - use the SAME lensPunch as export
+                // (k1 barrel + overscan). Canvas 2D can't do per-pixel lens,
+                // so approximate barrel as extra scale via the same bell curve;
+                // the barrel amount matches lens.js norm compensation.
+                const LENS = (typeof CoreLens !== "undefined" ? CoreLens : (typeof root !== "undefined" ? root.CoreLens : null));
+                if (LENS && LENS.lensPunch) {
+                    const lp = LENS.lensPunch(t, { at: a0, durMs: Math.max(0.05, a1 - a0) * 1000, k1: (f.amp != null ? f.amp : 0.18) });
+                    // lp.k1 is 0 outside, ~0.18 at peak; convert to scale via norm
+                    // norm = 1 + k1*rCorner2, extra scale = norm (export overscan)
+                    const aspect = outW / outH;
+                    const rC2 = Math.pow(Math.max(0.5, aspect - 0.5), 2) + 0.25;
+                    const norm = 1 + lp.k1 * rC2;
+                    const extra = Math.max(1, norm);
+                    scale = Math.max(scale, extra);
+                    // CA is not visible on 2D canvas, but keep scale parity
+                } else {
+                    const p = Math.max(0, Math.min(1, (t - a0) / Math.max(0.05, a1 - a0)));
+                    const bell = p > 0 ? Math.exp(-Math.pow((p - 0.32) / 0.35, 2)) : 0;
+                    scale = Math.max(scale, 1 + 0.5 * (f.amp != null ? f.amp : 0.18) * bell);
+                }
             } else if (f.kind === "threshold") {
                 if (t >= a0 && t <= a1) threshold = true;
             } else if (f.kind === "whip") {
@@ -375,8 +392,17 @@
         if (s.barTop > 0) { w.fillStyle = "#000"; w.fillRect(0, 0, outW, s.barTop); }
         if (s.barBottom > 0) { w.fillStyle = "#000"; w.fillRect(0, outH - s.barBottom, outW, s.barBottom); }
 
+        // studio:text-z-canvas - FX "text_z": flashes on layers ABOVE the
+        // topmost text layer must burn OVER text. Split flashes here so
+        // under-text flashes go into `work` (and thus under the blit+text),
+        // over-text flashes go AFTER text on the visible canvas.
+        const textZ = (this.hooks.textZ ? this.hooks.textZ(t) : null);
+        const fxOver = (textZ != null && textZ >= 0)
+            ? fx.filter(function (f) { return f.kind === "flash" && (f.z != null ? f.z : 999) <= textZ; })
+            : [];
+        const isOver = fxOver.length ? (function () { const s = new Set(fxOver); return function (f) { return s.has(f); }; })() : function () { return false; };
         for (const f of fx) {
-            if (f.kind !== "flash") continue;
+            if (f.kind !== "flash" || isOver(f)) continue;
             const p = (t - fxIn(f)) / Math.max(1e-3, fxOut(f) - fxIn(f));
             if (p < 0 || p > 1) continue;
             const env = p < 0.12 ? p / 0.12 : Math.exp(-(p - 0.12) * 4.2);
@@ -391,6 +417,20 @@
         const cue = this.hooks.cueAt ? this.hooks.cueAt(t) : null;
         if (cue && this._stylesLoaded) {
             TXT.drawCue(this.ctx, cue, cue.localT != null ? cue.localT : t, outW, outH, cue.styleOverride);
+        }
+        // studio:text-z-canvas over-text flashes ON TOP of text
+        if (fxOver.length) {
+            this.ctx.save();
+            for (const f of fxOver) {
+                const p = (t - fxIn(f)) / Math.max(1e-3, fxOut(f) - fxIn(f));
+                if (p < 0 || p > 1) continue;
+                const env = p < 0.12 ? p / 0.12 : Math.exp(-(p - 0.12) * 4.2);
+                const colors = { white: "255,255,255", red: "255,34,34", green: "57,255,0" };
+                const rgb = colors[f.color] || colors.white;
+                this.ctx.fillStyle = "rgba(" + rgb + "," + ((f.peak || 0.85) * env).toFixed(3) + ")";
+                this.ctx.fillRect(0, 0, outW, outH);
+            }
+            this.ctx.restore();
         }
         return true;
     };
