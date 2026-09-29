@@ -171,11 +171,10 @@
             if (!S.musicFile) await ensureMusic();
             const dur = Number(($("discDurSelect") || {}).value || 21);
             const pics = Number(($("discPicsSelect") || {}).value || 4);
-            const hook = (($("discHookInput") || {}).value || "ДИСЦИПЛИНА").trim();
             status("Планирую эдит …");
             const plan = await api("/api/studio/discipline/plan", {
                 materials: S.materials, music_file: S.musicFile,
-                music_offset: 0, target_dur: dur, n_pics: pics, hook_text: hook
+                music_offset: 0, target_dur: dur, n_pics: pics
             });
             if (!window.Studio || !window.Studio.applyDisciplinePlan) {
                 status("Редактор ещё грузится — подожди и нажми снова.");
