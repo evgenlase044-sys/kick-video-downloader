@@ -26,13 +26,11 @@ import os
 import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
-HOP_S = 0.1
+HOP_S = 0.05
 MIN_CUT_GAP = 0.8
 DEFAULT_MUSIC_BASENAME = "discipline_music.mp4"
 TAKEOVER_S = 1.0          # card grows from 0.2 to fullscreen over the video
-OUTRO_MAX_S = 6.0         # typographic slides block
-SLIDE_W, SLIDE_H = 1080, 1920
-ACCENT = (232, 255, 42)   # acid yellow (matches the app subtitle style)
+ANALYSIS_VERSION = 3      # bump to invalidate cached .discipline_music.json
 
 
 # ── music analysis ───────────────────────────────────────────────────
@@ -54,34 +52,135 @@ def _rms_series(path: str, hop: float = HOP_S, sr: int = 8000,
     return out
 
 
-def analyze_music(path: str) -> Dict[str, Any]:
-    """Onsets (cuts) + drop (biggest energy jump) of the music track."""
-    rms = _rms_series(path)
-    hop = HOP_S
+def _fine_onsets(rms: List[float], hop: float) -> Tuple[List[float], List[float]]:
+    """Onsets with a fine 0.2s minimal gap + their strength (dB jump)."""
     d = [rms[i + 1] - rms[i] for i in range(len(rms) - 1)]
-    pos = sorted((v for v in d if v > 0))
+    pos = sorted(v for v in d if v > 0)
     thr = pos[int(len(pos) * 0.90)] if pos else 3.0
-    onsets: List[float] = []
-    last = -10.0
+    ts: List[float] = []
+    ss: List[float] = []
     for i in range(1, len(d) - 1):
         if d[i] > thr and d[i] >= d[i - 1] and d[i] > d[i + 1]:
             t = i * hop
-            if t - last >= MIN_CUT_GAP:
-                onsets.append(round(t, 2))
-                last = t
+            if not ts or t - ts[-1] >= 0.2:
+                ts.append(round(t, 2))
+                ss.append(d[i])
+    return ts, ss
+
+
+def _beat_grid(ts: List[float], ss: List[float], dur: float) -> Tuple[float, float, List[float]]:
+    """Kick grid via comb scoring of the onset-strength pulse train: for every
+    candidate period (0.30-0.60s) and phase, mean pulse at the grid points —
+    robust to missing hits. Two passes: coarse 10ms, refined 2ms.
+    Returns (period, phase, beats)."""
+    hop = HOP_S
+    n = int(dur / hop) + 1
+    pulse = [0.0] * n
+    for t, s in zip(ts, ss):
+        i = int(round(t / hop))
+        if 0 <= i < n:
+            pulse[i] = s
+
+    def best_phase(p: float) -> Tuple[float, float]:
+        bs, bp = -1.0, 0.0
+        k = 0
+        while k * hop < p:
+            ph = k * hop
+            s = cnt = 0
+            t = ph
+            while t < dur:
+                i = int(round(t / hop))
+                if 0 <= i < n:
+                    s += pulse[i]
+                cnt += 1
+                t += p
+            s /= max(1, cnt)
+            if s > bs:
+                bs, bp = s, ph
+            k += 1
+        return bs, bp
+
+    best = (-1.0, 0.45, 0.0)
+    p = 0.30
+    while p <= 0.60 + 1e-9:
+        s, ph = best_phase(p)
+        if s > best[0]:
+            best = (s, p, ph)
+        p += 0.01
+    # refine around the winner
+    p0 = best[1]
+    p = p0 - 0.012
+    while p <= p0 + 0.012 + 1e-9:
+        s, ph = best_phase(p)
+        if s > best[0]:
+            best = (s, p, ph)
+        p += 0.002
+    per, phase = round(best[1], 3), round(best[2], 3)
+    per = min(0.60, max(0.30, per))
+    beats = [round(k * per + phase, 2) for k in range(int(dur / per) + 2)
+             if k * per + phase <= dur]
+    return per, phase, beats
+
+
+def _accent_cadence(beats: List[float], drop: float, per: float,
+                    dur: float) -> List[float]:
+    """Мотивационные удары: a STEADY hit cadence (~every 2.2s) locked to the
+    beat grid and anchored on the drop, so every impact SFX/visual lands on a
+    kick for the whole track."""
+    step = max(4, round(2.2 / per)) * per
+    if drop <= 0:
+        return [round(k * step, 2) for k in range(int(dur / step) + 1)]
+    out: List[float] = []
+    t = drop
+    while t <= dur:
+        out.append(round(t, 2))
+        t += step
+    t = drop - step
+    while t >= 0:
+        out.append(round(t, 2))
+        t -= step
+    return sorted(set(out))
+
+
+def analyze_music(path: str) -> Dict[str, Any]:
+    """Beats, accents (мотивационные удары), onsets and the drop of the track.
+
+    beats   — the kick grid (period + phase), cut points snap to it;
+    accents — a steady impact cadence (~every 2.2s) locked to the grid and
+              anchored on the drop: each gets an impact SFX and a visual hit
+              (zoom / shake / cut) in the edit.
+    """
+    rms = _rms_series(path)
+    hop = HOP_S
+    ts, ss = _fine_onsets(rms, hop)
+    per, phase, beats = _beat_grid(ts, ss, len(rms) * hop)
+    # sparse onsets for cut fallbacks (0.8s thinning, as before)
+    onsets: List[float] = []
+    last = -10.0
+    for t in ts:
+        if t - last >= MIN_CUT_GAP:
+            onsets.append(t)
+            last = t
     # drop = max mean-energy jump between consecutive 2s windows in first 40s
     drop = 0.0
     best = 0.0
-    per = max(1, int(2.0 / hop))
-    for i in range(0, min(len(rms) - 2 * per, int(40 / hop))):
-        a = sum(rms[i:i + per]) / per
-        b = sum(rms[i + per:i + 2 * per]) / per
+    perw = max(1, int(2.0 / hop))
+    for i in range(0, min(len(rms) - 2 * perw, int(40 / hop))):
+        a = sum(rms[i:i + perw]) / perw
+        b = sum(rms[i + perw:i + 2 * perw]) / perw
         if b - a > best:
             best = b - a
-            drop = round((i + per) * hop, 2)
+            drop = round((i + perw) * hop, 2)
+    # snap the drop onto the grid
+    if beats:
+        nb = min(beats, key=lambda b: abs(b - drop))
+        if abs(nb - drop) <= 0.25:
+            drop = nb
     dur = len(rms) * hop
-    return {"duration": round(dur, 2), "onsets": onsets, "drop": drop,
-            "drop_gain_db": round(best, 2)}
+    accents = _accent_cadence(beats, drop, per, dur)
+    return {"duration": round(dur, 2), "onsets": onsets, "drop": round(drop, 2),
+            "drop_gain_db": round(best, 2), "beat_period": per,
+            "beat_phase": phase, "beats": beats, "accents": accents}
 
 
 def music_cache_path(downloads_dir: str, music_file: str) -> str:
@@ -91,7 +190,7 @@ def music_cache_path(downloads_dir: str, music_file: str) -> str:
 def get_music_analysis(downloads_dir: str, music_file: str) -> Dict[str, Any]:
     path = os.path.join(downloads_dir, os.path.basename(music_file))
     cp = music_cache_path(downloads_dir, music_file)
-    key = f"{os.path.basename(path)}:{os.path.getsize(path)}:{int(os.path.getmtime(path))}"
+    key = f"v{ANALYSIS_VERSION}:{os.path.basename(path)}:{os.path.getsize(path)}:{int(os.path.getmtime(path))}"
     try:
         with open(cp, "r", encoding="utf-8") as fh:
             cached = json.load(fh)
@@ -205,13 +304,10 @@ def still_to_loop(png_path: str, mp4_path: str, dur: float = 6.0, fps: int = 30)
 
 
 # ── plan ─────────────────────────────────────────────────────────────
-def _snap_to_onset(t: float, onsets: List[float], tol: float = 0.6) -> float:
-    best, bd = None, tol
-    for o in onsets:
-        d = abs(o - t)
-        if d < bd:
-            bd, best = d, o
-    return round(best, 2) if best is not None else round(t, 2)
+def _snap_beat(t: float, beats: List[float]) -> float:
+    if not beats:
+        return round(t, 2)
+    return round(min(beats, key=lambda b: abs(b - t)), 2)
 
 
 def _merge_close(bounds: List[float], min_gap: float = 0.9) -> List[float]:
@@ -278,179 +374,61 @@ def _pick_takeover_pic(pics: List[str], last_clip_file: str) -> str:
     return pics[0]
 
 
-# ── typographic slides (outro) ───────────────────────────────────────
-def _load_font(size: int):
-    from PIL import ImageFont
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for name in ("montserrat-montserrat-extrabold.ttf",
-                 "firasans-FiraSans-ExtraBold.ttf",
-                 "anton-Anton-Regular.ttf"):
-        p = os.path.join(here, "fonts", name)
-        if os.path.exists(p):
-            try:
-                return ImageFont.truetype(p, size)
-            except Exception:
-                continue
-    return ImageFont.load_default()
-
-
-def _fit_font(text: str, max_w: int, start_size: int) -> Any:
-    size = start_size
-    while size > 28:
-        f = _load_font(size)
-        try:
-            w = f.getbbox(text)[2] - f.getbbox(text)[0]
-        except Exception:
-            w = f.getsize(text)[0]
-        if w <= max_w:
-            return f
-        size = int(size * 0.92)
-    return _load_font(28)
-
-
-def _draw_center(draw, y: int, text: str, font, fill, max_w: int,
-                 highlight: bool = False) -> int:
-    try:
-        bb = font.getbbox(text)
-        w, h = bb[2] - bb[0], bb[3] - bb[1]
-    except Exception:
-        w, h = font.getsize(text)
-    x = (SLIDE_W - w) // 2
-    if highlight:
-        pad = 18
-        draw.rectangle([x - pad, y - pad, x + w + pad, y + h + pad], fill=ACCENT)
-        draw.text((x, y), text, font=font, fill=(10, 10, 10))
-    else:
-        draw.text((x, y), text, font=font, fill=(255, 255, 255))
-    return h
-
-
-def make_type_slides(work_dir: str, hook: str = "ДИСЦИПЛИНА",
-                     caption: str = "НАЧНИ СЕГОДНЯ") -> List[str]:
-    """Three black typographic slides (1080x1920): hook, repeated-word wall
-    with one highlighted row, end card with a yellow underline bar."""
-    from PIL import Image, ImageDraw
-    import zlib
-    os.makedirs(work_dir, exist_ok=True)
-    ascii_safe = "".join(c for c in (hook or "EDIT").upper() if c.isascii() and c.isalnum())[:12]
-    if len(ascii_safe) < 3:
-        ascii_safe = "s" + format(zlib.crc32((hook or "EDIT").encode("utf-8")) % 100000, "05d")
-    safe = ascii_safe
-    paths = []
-
-    def _save(img: "Image.Image", tag: str) -> str:
-        p = os.path.join(work_dir, f"discipline_slide_{safe}_{tag}.png")
-        img.save(p)
-        paths.append(p)
-        return p
-
-    hook_u = (hook or "ДИСЦИПЛИНА").upper().strip()
-
-    # 1. hook word, huge
-    img = Image.new("RGB", (SLIDE_W, SLIDE_H), (8, 8, 8))
-    d = ImageDraw.Draw(img)
-    f = _fit_font(hook_u, SLIDE_W - 160, 190)
-    _draw_center(d, SLIDE_H // 2 - 160, hook_u, f, (255, 255, 255), SLIDE_W - 160)
-    if caption:
-        fc = _load_font(44)
-        _draw_center(d, SLIDE_H // 2 + 140, caption.upper(), fc, (150, 155, 160), SLIDE_W - 200)
-    _save(img, "hook")
-
-    # 2. repeated-word wall, one highlighted row (CONSISTENCY-style)
-    img = Image.new("RGB", (SLIDE_W, SLIDE_H), (8, 8, 8))
-    d = ImageDraw.Draw(img)
-    rows = 7
-    fr = _fit_font(hook_u, SLIDE_W - 220, 92)
-    rh = 210
-    y0 = (SLIDE_H - rows * rh) // 2 + 80
-    for i in range(rows):
-        fade = max(0.10, 1.0 - i * (0.92 / rows))
-        y = y0 + i * rh
-        if i == 2:
-            _draw_center(d, y, hook_u, fr, (255, 255, 255), SLIDE_W - 220, highlight=True)
-        else:
-            col = int(255 * fade)
-            try:
-                d.text((SLIDE_W // 2, y), hook_u, font=fr, fill=(col, col, col), anchor="ma")
-            except Exception:
-                _draw_center(d, y, hook_u, fr, (col, col, col), SLIDE_W - 220)
-    _save(img, "wall")
-
-    # 3. end card: hook + yellow bar + caption
-    img = Image.new("RGB", (SLIDE_W, SLIDE_H), (8, 8, 8))
-    d = ImageDraw.Draw(img)
-    f = _fit_font(hook_u, SLIDE_W - 160, 168)
-    bb = f.getbbox(hook_u)
-    h = bb[3] - bb[1]
-    y = SLIDE_H // 2 - h // 2 - 40
-    _draw_center(d, y, hook_u, f, (255, 255, 255), SLIDE_W - 160)
-    pad = 70
-    d.rectangle([SLIDE_W // 2 - pad, y + h + 42, SLIDE_W // 2 + pad, y + h + 58], fill=ACCENT)
-    if caption:
-        fc = _load_font(48)
-        _draw_center(d, y + h + 130, caption.upper(), fc, (150, 155, 160), SLIDE_W - 200)
-    _save(img, "end")
-    return paths
-
-
-def _slide_loops(work_dir: str, hook: str, caption: str, dur: float = 1.6) -> List[str]:
-    """PNG slides -> mp4 loops in downloads/ (cached by name)."""
-    out = []
-    for png in make_type_slides(work_dir, hook, caption):
-        mp4 = os.path.splitext(png)[0] + ".mp4"
-        png_mtime = os.path.getmtime(png)
-        if not (os.path.exists(mp4) and os.path.getsize(mp4) > 1024
-                and os.path.getmtime(mp4) >= png_mtime):
-            if not still_to_loop(png, mp4, dur=dur):
-                continue
-        out.append(os.path.basename(mp4))
-    return out
-
-
 def plan_discipline(*, materials: List[Dict[str, Any]], music_file: str,
                     music_offset: float = 0.0, target_dur: float = 21.0,
-                    n_pics: int = 4, hook_text: str = "ДИСЦИПЛИНА",
+                    n_pics: int = 4, hook_text: str = "",
                     pic_loops: Optional[List[str]] = None,
                     push_peak: float = 0.08,
-                    analysis: Optional[Dict[str, Any]] = None,
-                    work_dir: Optional[str] = None,
-                    slide_caption: str = "НАЧНИ СЕГОДНЯ") -> Dict[str, Any]:
-    """Build the edit: beat-cut videos -> card takeover on the drop -> beat
-    cards with tints -> typographic outro.
+                    analysis: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Build the edit aligned to the track's kick grid: beat-cut videos ->
+    card takeover on the drop -> beat cards with tints -> end on the final hit.
+
+    No white-flash transitions, no text outro: every musical accent gets an
+    impact SFX plus a visual hit (zoom / shake / picture change) — that is the
+    whole point of the reference edits.
 
     materials: [{filename, duration}] (files live in downloads/).
-    Returns timeline-ready spec: clips (base track), cards (cards track,
-    with scale_from/scale_in/tint), fx (per track), sounds, music.
+    hook_text: deprecated (text outro removed), kept for API compatibility.
     """
     target_dur = max(8.0, min(60.0, float(target_dur or 21.0)))
-    onsets = [float(o) + music_offset for o in ((analysis or {}).get("onsets") or [])]
-    drop = float((analysis or {}).get("drop") or 8.0) + music_offset
-    drop = max(4.0, min(target_dur - 6.0, drop))
+    per = float((analysis or {}).get("beat_period") or 0.45)
+    phase = float((analysis or {}).get("beat_phase") or 0.0)
+    music_dur = float((analysis or {}).get("duration") or 0.0)
+    off = round(phase + music_offset, 2)   # music-time -> video-time shift
+
+    # duration = whole beats <= target: music starts AND ends on the grid
+    n_beats = max(8, int(round(target_dur / per)))
+    duration = round(n_beats * per, 2)
+    while music_dur and off + duration > music_dur - 0.3 and n_beats > 8:
+        n_beats -= 1
+        duration = round(n_beats * per, 2)
+    beats = [round(b - off, 2) for b in ((analysis or {}).get("beats") or [])
+             if off <= b <= off + duration - 0.05]
+    if not beats:
+        beats = [round(k * per, 2) for k in range(n_beats + 1)]
 
     fx: List[Dict[str, Any]] = []
     sounds: List[Dict[str, Any]] = []
     clips: List[Dict[str, Any]] = []
     cards: List[Dict[str, Any]] = []
 
-    # ── outro slides first: they decide where part B ends ───────────────
-    slides: List[str] = []
-    if work_dir:
-        try:
-            slides = _slide_loops(work_dir, hook_text or "ДИСЦИПЛИНА", slide_caption)
-        except Exception:
-            slides = []
-    outro_len = min(OUTRO_MAX_S, max(3.5, target_dur * 0.28)) if slides else 0.0
-    outro_start = target_dur - outro_len
+    def _snap(t: float) -> float:
+        return _snap_beat(t, beats)
 
     # ── part A: beat-cut video intro [0, drop] ──────────────────────────
-    pre_onsets = [o for o in onsets if 0.6 < o < drop - 0.4]
-    n_seg = max(2, min(5, int(drop / 2.0)))
+    drop = _snap(float((analysis or {}).get("drop") or 8.0) - off)
+    drop = _snap(min(max(4.0, drop), duration - 4.0))
+    n_seg = max(2, min(5, int(drop / 2.2)))
     bounds = [0.0]
     for i in range(1, n_seg):
-        bounds.append(_snap_to_onset(drop * i / n_seg, pre_onsets))
-    bounds = _merge_close(sorted(set(bounds + [drop])))
+        bounds.append(_snap(drop * i / n_seg))
+    bounds = sorted(set(bounds + [drop]))
+    bounds = _merge_close(bounds)
     if bounds[-1] < drop:
-        bounds.append(drop)
+        if drop - bounds[-1] < 0.9:
+            bounds[-1] = drop          # extend the last segment, never drop the drop
+        else:
+            bounds.append(drop)
     seg_reserve = TAKEOVER_S + 0.5
     for i in range(len(bounds) - 1):
         s, e = bounds[i], bounds[i + 1]
@@ -465,23 +443,17 @@ def plan_discipline(*, materials: List[Dict[str, Any]], music_file: str,
     if clips:
         last = clips[-1]
         room = max(0.0, last.get("mdur", 10.0) - last["src_in"] - last["duration"])
-        extra = min(TAKEOVER_S + 0.4, room)
-        last["duration"] = round(last["duration"] + extra, 2)
+        last["duration"] = round(last["duration"] + min(TAKEOVER_S + 0.4, room), 2)
     for c in clips:
         c.pop("mdur", None)
-    # push on every intro clip (alternating in/out) + flash/whoosh on cuts
+    # hard cuts, no white flashes: movement comes from the alternating push
     for i, c in enumerate(clips):
         fx.append({"kind": "push", "mode": "in" if i % 2 == 0 else "out",
                    "start": c["out_start"],
                    "end": round(c["out_start"] + c["duration"], 2),
                    "peak": round(push_peak + 0.03 + (i % 2) * 0.02, 3),
                    "track": "video"})
-    for b in bounds[1:-1]:
-        fx.append({"kind": "flash", "start": round(max(0.0, b - 0.06), 2),
-                   "end": round(b + 0.07, 2), "peak": 0.85, "color": "white",
-                   "track": "video"})
-        sounds.append({"kind": "whoosh", "at": round(b, 2), "gain": 0.7})
-    # pre-drop zoom punch + riser into the drop
+    # pre-drop zoom punch + riser into the drop, boom ON the drop
     fx.append({"kind": "zoom", "start": round(max(0.0, drop - 0.55), 2),
                "end": round(drop - 0.05, 2), "peak": 0.17, "track": "video"})
     sounds.append({"kind": "riser", "at": round(max(0.0, drop - 1.3), 2), "gain": 0.8})
@@ -491,10 +463,10 @@ def plan_discipline(*, materials: List[Dict[str, Any]], music_file: str,
     pics = list(pic_loops or [])
     tints = ["none", "red", "bw", "blue"]
     takeover = None
-    first_end = _snap_to_onset(drop + 2.2,
-                               [o for o in onsets if drop + 1.4 < o < outro_start - 0.5],
-                               tol=0.7)
-    first_end = min(max(first_end, drop + 1.8), outro_start - 0.4)
+    if pics:
+        first_end = min(max(_snap(drop + 2.0), drop + 1.8), duration - 1.0)
+    else:
+        first_end = drop   # no card to cover [drop, first_end]: resume right there
     if pics:
         pic0 = _pick_takeover_pic(pics, clips[-1]["filename"] if clips else "")
         takeover = {"kind": "pic", "file": pic0, "src_in": 0,
@@ -507,30 +479,42 @@ def plan_discipline(*, materials: List[Dict[str, Any]], music_file: str,
                    "end": round(drop + 0.45, 2), "amp": 14, "freq": 8,
                    "track": "cards"})
 
-    # ── part B: beat cards + video hits [first_end, outro_start] ───────
-    bo = [o for o in onsets if drop + 2.6 < o < outro_start - 0.7]
-    step = max(1, len(bo) // max(2, n_pics * 2))
-    bo = bo[::step][:max(2, n_pics + 2)]
-    bbounds = _merge_close([round(drop, 2)] + [round(o, 2) for o in bo]
-                           + [round(outro_start, 2)], min_gap=1.1)
-    if bbounds[-1] < outro_start - 0.4:
-        bbounds.append(round(outro_start, 2))
-    if takeover:
-        # the takeover card IS the first slot; later bounds must clear it
-        bbounds = ([round(drop, 2), round(first_end, 2)]
-                   + [b for b in bbounds[1:] if b > first_end + 0.6])
-    # sparse onsets must not leave long static slots (visual monotony)
+    # ── part B: beat cards + video hits [first_end, end] ────────────────
+    step = max(3, round(1.4 / per))   # beats between picture changes
+    bbounds = [round(first_end, 2)]
+    t = first_end
+    while t < duration - 1.0:
+        t = _snap(t + step * per)
+        if t <= bbounds[-1]:
+            t = round(bbounds[-1] + step * per, 2)
+        bbounds.append(min(round(t, 2), duration))
+    if bbounds and bbounds[-1] >= duration:
+        bbounds[-1] = round(duration, 2)
+    else:
+        bbounds.append(round(duration, 2))
+    # merge close bounds but NEVER drop the final one (a dropped end = a hole)
+    head = _merge_close(bbounds[:-1], min_gap=0.9)
+    if head and bbounds[-1] - head[-1] < 0.9:
+        head[-1] = bbounds[-1]
+    else:
+        head.append(bbounds[-1])
+    bbounds = head
     bbounds = _split_long_slots(bbounds, max_slot=2.8)
+    bbounds_tail = bbounds[1:]
+    if takeover:
+        # the takeover card IS the first slot: slots resume at its end
+        bbounds = [round(first_end, 2)] + [b for b in bbounds_tail
+                                           if b > first_end + 0.6]
     hit_k = len(clips)
     card_k = 1
     vid_k = 0
-    slot_from = 0 if not takeover else 1
-    for i in range(slot_from, len(bbounds) - 1):
-        s, e = bbounds[i], bbounds[i + 1]
+    slot_i = 1 if takeover else 0
+    for s, e in zip(bbounds, bbounds[1:]):
         if e - s < 0.7:
             continue
-        slot_tint = tints[i % len(tints)]   # adjacent slots never repeat
-        use_video = (i % 3 == 2) or (not pics and materials)
+        slot_i += 1
+        slot_tint = tints[slot_i % len(tints)]
+        use_video = (slot_i % 3 == 0) or not pics
         if use_video and materials:
             hit = _video_hit(materials, hit_k, e - s)
             hit_k += 1
@@ -542,7 +526,6 @@ def plan_discipline(*, materials: List[Dict[str, Any]], music_file: str,
                           "tint": slot_tint, "layer": "cards"})
             fx.append({"kind": "push", "start": round(s, 2),
                        "end": round(e, 2), "peak": 0.16, "track": "cards"})
-            sounds.append({"kind": "whoosh", "at": round(s, 2), "gain": 0.6})
         else:
             card = (pics[card_k % len(pics)] if pics else None)
             entry = {"kind": "pic" if card else "video",
@@ -557,30 +540,40 @@ def plan_discipline(*, materials: List[Dict[str, Any]], music_file: str,
                 entry["src_in"] = mh["src_in"]
             cards.append(entry)
             card_k += 1
-            fx.append({"kind": "flash", "start": round(max(0.0, s - 0.05), 2),
-                       "end": round(s + 0.08, 2), "peak": 0.30, "color": "white",
-                       "track": "cards"} if card_k % 2 == 0 else
-                      {"kind": "push", "start": round(s, 2),
-                       "end": round(e, 2), "peak": 0.10, "track": "cards"})
-            sounds.append({"kind": "hit_small", "at": round(s, 2), "gain": 0.9})
+            # no extra FX here: the scale_in pop IS the beat hit, and the
+            # total FX budget per graph must stay low (~12) or ffmpeg stalls
 
-    # ── outro: typographic slides on black (slides were made first) ─────
-    if slides:
-        n_slides = len(slides)
-        sl = (target_dur - outro_start) / n_slides
-        for i, name in enumerate(slides):
-            s = outro_start + i * sl
-            cards.append({"kind": "pic", "file": name, "src_in": 0,
-                          "out_start": round(s, 2), "duration": round(sl, 2),
-                          "scale_from": 0.90, "scale_in": 0.25,
-                          "tint": "none", "layer": "cards"})
-            sounds.append({"kind": "boom" if i == n_slides - 1 else "hit_small",
-                           "at": round(s, 2), "gain": 1.0 if i == n_slides - 1 else 0.7})
-        # hard cut into the outro (no flash): the black slide IS the cut
+    # ── accent cadence: impact SFX + a visual hit on every musical удар ──
+    accents = [round(a - off, 2) for a in ((analysis or {}).get("accents") or [])
+               if 0.5 <= a - off <= duration - 0.2]
+    bounds_all = bounds[1:-1] + bbounds
+    zi = 0
+    for a in accents:
+        if abs(a - drop) < 0.1:
+            continue   # the drop already has boom + shake + takeover
+        if any(abs(a - b) < 0.12 for b in bounds_all):
+            # the picture change on the beat IS the visual hit
+            sounds.append({"kind": "hit_small", "at": round(a, 2), "gain": 0.55})
+            continue
+        if zi >= 4:
+            sounds.append({"kind": "boom", "at": round(a, 2), "gain": 0.5})
+            continue
+        zi += 1
+        fx_track = "cards" if a >= drop - 0.05 else "video"
+        # cheap shake only: zoom chains (eval=frame scale + tmix) multiply the
+        # graph cost and the exporter stalls past ~a dozen of them
+        fx.append({"kind": "shake", "start": round(a, 2),
+                   "end": round(a + 0.22, 2), "amp": 9, "freq": 9,
+                   "track": fx_track})
+        sounds.append({"kind": "boom", "at": round(a, 2), "gain": 0.5})
+    # final hit: the edit ends ON the grid with a punch + impact
+    fx.append({"kind": "zoom", "start": round(duration - 0.45, 2),
+               "end": round(duration - 0.02, 2), "peak": 0.14, "track": "cards"})
+    sounds.append({"kind": "boom", "at": round(duration - 0.03, 2), "gain": 0.9})
 
-    return {"format": "fullscreen", "fps": 30, "duration": round(target_dur, 2),
+    return {"format": "fullscreen", "fps": 30, "duration": duration,
             "drop": round(drop, 2), "clips": clips, "cards": cards,
-            "fx": fx, "sounds": sounds, "text": [], "slides": slides,
+            "fx": fx, "sounds": sounds,
             "music": {"filename": os.path.basename(music_file),
-                      "offset": round(music_offset, 2), "duration": round(target_dur, 2)},
+                      "offset": off, "duration": duration},
             "subtitle_mode": "none"}

@@ -82,8 +82,7 @@ class DisciplinePlanRequest(BaseModel):
     music_offset: float = 0.0
     target_dur: float = Field(21.0, ge=8.0, le=60.0)
     n_pics: int = Field(4, ge=0, le=12)
-    hook_text: str = "ДИСЦИПЛИНА"
-    slide_caption: str = "НАЧНИ СЕГОДНЯ"
+    hook_text: str = ""   # deprecated: text outro removed (v3)
     push_peak: float = Field(0.08, ge=0.02, le=0.25)
 
 
@@ -258,9 +257,7 @@ def build_router(downloads_dir: str) -> APIRouter:
                                  music_offset=req.music_offset,
                                  target_dur=req.target_dur, n_pics=req.n_pics,
                                  hook_text=req.hook_text, pic_loops=loops,
-                                 push_peak=req.push_peak, analysis=analysis,
-                                 work_dir=downloads_dir,
-                                 slide_caption=req.slide_caption)
+                                 push_peak=req.push_peak, analysis=analysis)
         return plan
 
     return r
