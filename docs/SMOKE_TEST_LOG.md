@@ -1,7 +1,7 @@
-# Smoke Test Log (PR #7 / PR #8 / PR #9)
+# Smoke Test Log (PR #7 / PR #8 / PR #9 / PR #10 + e79d9c2/3a75b3e)
 
-Дата: 2026-09-28
-Окружение: Windows 11, Python 3.12, ffmpeg, Chrome / Electron Browser Subagent, Local Server (`127.0.0.1:8765`).
+Дата: 2026-09-28 → 2026-09-29 (дополнен e79d9c2/3a75b3e)
+Окружение: Windows 11, Python 3.12, ffmpeg, Chrome / Electron Browser Subagent, Local Server (`127.0.0.1:8765` / `8788/8790` для API smoke).
 
 ---
 
@@ -150,11 +150,29 @@ OK
    - Добавлен `riser.mp3` в `sfx/CREDITS.md`.
    - Результат: **ALL VERIFICATION CHECKS PASSED in 102.3s**.
 4. **Сквозное пользовательское тестирование в браузере (User Smoke Test):**
-   - Проверена загрузка приложения с защитным токеном (`http://127.0.0.1:8765/index.html?token=...`).
-   - Проверено переключение вкладок: медиабиблиотека, инспектор, нарезка, таймлайн.
-   - Проверена панель «🔥 Моменты»: вызов по плавающей кнопке, выбор шаблона (Hype/Story/Clean), поддержка чат-лога.
-   - Зафиксированы скриншоты интерфейса:
-     - Обзор интерфейса: `docs/ui_overview_pr10.png`
-     - Панель автопоиска моментов: `docs/moments_panel_pr10.png`
-     - Раскладка редактора: `docs/editor_layout_pr10.png`
+    - Проверена загрузка приложения с защитным токеном (`http://127.0.0.1:8765/index.html?token=...`).
+    - Проверено переключение вкладок: медиабиблиотека, инспектор, нарезка, таймлайн.
+    - Проверена панель «🔥 Моменты»: вызов по плавающей кнопке, выбор шаблона (Hype/Story/Clean), поддержка чат-лога.
+    - Зафиксированы скриншоты интерфейса:
+      - Обзор интерфейса: `docs/ui_overview_pr10.png`
+      - Панель автопоиска моментов: `docs/moments_panel_pr10.png`
+      - Раскладка редактора: `docs/editor_layout_pr10.png`
+5. **Live API smoke 2026-09-29 (порт 8788–8790, token-auth, HEAD e79d9c2):**
+    - `GET /` без токена → `200` (страница отдаётся; защита на уровне `/api/*` и WebSocket — middleware `studio.security`).
+    - `GET /` с `?token=` → `200` с `Kick Video Studio` в `<title>` (104 KB).
+    - `GET /api/studio/status?token=` → `200`, patches `server.py` `already:30` / `web/index.html` `already:5` / `web/editor.js` patched.
+    - `GET /api/version?token=` → `200` `{"sha":"3a75b3e","server_mtime":...,"api":3}`.
+    - `GET /api/disk-info?token=` → `200` `C:\ 222 GB / free 10 GB (порог пика x2.1 учтён в UI)`.
+    - `GET /api/media/library?token=` → `200` с `_vt_test_src.mp4` (синтетика для e2e).
+    - `GET /api/grade/lut?token=` → `200` `TITLE "Kick Clip Studio - TV Acid v8"`.
+    - `GET /api/sfx/list?token=` → `200` (19 файлов, синонимы `click`→`camera_click`).
+    - `GET /api/export-queue/status?token=` → `200` `{"running":false,"done":0,"total":0}`.
+    - `GET /api/studio/chat/status?token=` → `200` `{"recordings":{}}` (пусто до записи live).
+    - Статика с токеном: `GET /editor.js` 331 KB, `/app.js` 30 KB, `/core/canvasMonitor.js` 25 KB, `/core/render/glPasses.js` 17 KB, `/core/render/exporter.js` 9 KB — всё `200`.
+    - `POST /api/export-pack` (split_adhd tv, 3s, subtitles + text + zoom + flash, `text_z:2`) → `200` `exported_count:1` `Short_vt_...mp4` `3.59 MB` `loudness:{checked:true,input_i:-13.0,fixed:false}` → `downloads/exported_packs/` (ffprobe валиден). `text_z` сплит: `z=-1` flash над текстом, `z=5` zoom под текстом.
+    - `POST /api/preview-frame` (тот же payload, `src_time:1.0`) → `200 image/png` (рендер фильтр-графа, BT.709).
+    - `GET /api/probe` (live URL `kick.com/jesusavgn/videos/...`) → таймаут без сети/cookies (ожидаемо; offline `verify_all` и `KickExtractorApiTest` с моком — зелёные).
+    - Маркеры фронта на месте: `face-anchor-split`/`text-z-canvas`/`audio-master-clock` в `editor.js`+`canvasMonitor.js`, `disk-peak-label`/`chat-live-button` в `app.js`, `stickers`+`+Стикер` в editor lane, `glPasses`+`exporter` в `index.html`.
+    - JS parse ok: `node --check editor.js/app.js/canvasMonitor.js` `0`.
+    - `node web/core/selftest.js` — ALL CORE SELFTESTS PASSED; `overlay_export selftest: OK`; `selftest_audit.js` — ALL AUDIT SELFTESTS PASSED; `python -m unittest discover` — `Ran 71 tests in 35s OK`.
 

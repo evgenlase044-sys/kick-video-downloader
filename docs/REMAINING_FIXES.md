@@ -90,8 +90,8 @@
      - Нарезка и эффекты с серверным превью: ![Нарезка и эффекты](smoke_user_region_effects.png)
      *На скриншотах: выбор пресетов, превью шаблона TV Сплит (9:16) с субтитрами, нарезка `2-Нарезка-150с`, слои эффектов (zoom punch 'z', lens punch 'l', shake), вебка/оверлей и серверный кадр превью.*
    * **Логирование и отчёты прогона:** [`docs/SMOKE_TEST_LOG.md`](SMOKE_TEST_LOG.md) (включает логи сервера uvicorn, HTTP-запросы, вызовы `/api/preview-frame` и прогон 50 unit-тестов).
-   * Экспорт любого клипа: в ответе у клипа поле `loudness` (`fixed: true/false`, `output_i` ≈ −14).
-   * Скачивание при почти полном диске: кнопка заблокирована с текстом «на пике сборки нужно …».
+    * Экспорт любого клипа: в ответе у клипа поле `loudness` (`fixed: true/false`, `output_i` ≈ −14) — проверено live `POST /api/export-pack` 3s split_adhd tv → `loudness.checked:true`. Очередь `export_queue` также идёт через `export_clip_pack` → loudness gate.
+    * Скачивание при почти полном диске: кнопка заблокирована с текстом «на пике сборки нужно …» — `web/app.js` пишет сам текст кнопки (`disk-peak-label`) при `!isEnough`, `updateDownloadBtnLabel` восстанавливает.
 6. **Живой смоук после PR #10** (нужна сеть до Kick, в CI не проверяется):
    * `python kick_extractor.py <ссылка на VOD>` → в выводе `[api_v2_video]` или `[api_v1_video]`, не `[html]`.
    * `python chat_recorder.py <канал в эфире>` 2–3 минуты → в `downloads/chat_*.jsonl` растут строки `{t,user,text}`,
@@ -109,7 +109,7 @@
 * ~~Motion blur на зумах/whip~~ ✅ PR #9 (`zoom-mblur`, `whip-mblur`, `build_zoom_motion_blur`, `build_whip_motion_blur`).
 * ~~rgbashift в lens переводит клип через RGB~~ ✅ PR #9 (заменено на `chromashift`).
 * ~~Lens в экспорте без auto-overscan~~ ✅ PR #9 (расчет оверсана из ядра `lens.js`).
-* **FX «над текстом» (`text_z`)**: при canvas-слое текст всегда поверх всех FX.
+* ~~FX «над текстом» (`text_z`): при canvas-слое текст всегда поверх всех FX~~ ✅ `3a75b3e` — `canvasMonitor` сплитит flashes по `text_z` (`hooks.textZ`/`fxAt.z`), вспышки «над текстом» прожигаются ПОВЕРХ canvas-текста; «под текстом» — как прежде до `drawCue`.
 
 ## 2. Фронтенд (`web/editor.js`) — P1/P2
 * ~~`removeTrack()` до подтверждения, drag без `saveProject()`~~ ✅ `265e49c`.
@@ -118,14 +118,12 @@
 * ~~`ReferenceError` в серверном превью, неопределённый `token`~~ ✅ PR #8.
 * ~~`hooks.faceAnchor` в неправильных единицах~~ ✅ PR #8 (формат `{x,y}` 0..1).
 * ~~`tidOfFx()` не вызывается~~ ✅ удалён в PR #8.
-* **Якорь лица для сплит-раскладки:** трек-бокс в координатах исходника, а зум — в координатах выходного кадра 9:16.
-  Для `talking_head_9_16` это близко, для `split_adhd` нужен маппинг через `cropBox` верхней полосы.
-* **Аудио-мастер-клок не подключён** (`CoreTimeMap` умеет, `editor.js` не вызывает) — возможен дрейф превью.
-* Стикеров-картинок нет (emoji есть).
-* `core/render/exporter.js` не грузится, но лежит в репо; `core/render/glPasses.js` (GPU-ядра) нигде в приложении
-  не используется, только в `gltest.html`. Решить: подключить к превью или удалить оба.
-* Превью-lens в `canvasMonitor` — только масштаб (1 + 0.5·amp·bell), без бочки; экспорт — бочка. Выровнять.
-* UI для записи чата (кнопка «● Чат» у live-ссылки → `/api/studio/chat/record`) — бэкенд готов в PR #10.
+* ~~Якорь лица для сплит-раскладки: трек-бокс в координатах исходника, а зум — в координатах выходного кадра 9:16~~ ✅ `e79d9c2` — `faceAnchor()` маппит `SOURCE -> OUTPUT uv` через `cropBox` для `split_adhd` (`x_out=(fx-cropX)/cropW`, `y_out=(fy-cropY)/cropH * topH/outH`); `collectRegionFx` резолвит anchored zoom через тот же маппинг.
+* ~~Аудио-мастер-клок не подключён (`CoreTimeMap` умеет, `editor.js` не вызывает)~~ ✅ `e79d9c2` — `editor.js` заводит `AudioContext` + `CoreTimeMap.makeAudioClock`, `playbackLoop` ведётся по `masterElapsed` с blending к wall clock.
+* ~~Стикеров-картинок нет (emoji есть)~~ ✅ `e79d9c2` — `addStickerClip(file)` → `/api/media/upload` → PiP-оверлей на видео-дорожке, кнопка `+Стикер` инжектится в `.layers-add-btns`.
+* ~~`core/render/exporter.js` не грузится, но лежит в репо; `core/render/glPasses.js` (GPU-ядра) нигде в приложении не используется, только в `gltest.html`~~ ✅ `3a75b3e` — оба теперь грузятся в `web/index.html` перед `canvasMonitor.js`; `studio/web_patches.py` инжектит `glPasses`+`exporter` (WS render e2e, `verify_all` §17.2).
+* ~~Превью-lens в `canvasMonitor` — только масштаб (1 + 0.5·amp·bell), без бочки; экспорт — бочка~~ ✅ `e79d9c2` — `canvasMonitor` использует `CoreLens.lensPunch` + `norm` (баррель `k1` + overscan) для паритета с `fx_extra.py`.
+* ~~UI для записи чата (кнопка «● Чат» у live-ссылки → `/api/studio/chat/record`)~~ ✅ `e79d9c2` — `web/app.js` показывает ряд `● Чат — запись` для live-VOD, `POST /api/studio/chat/record|stop`, `GET /status` с poll счётчика сообщений.
 
 ## 3. Скачивание — P1/P2
 * ~~`/api/check-disk` без пика, UI «хватает» при отказе сервера~~ ✅ PR #7.
