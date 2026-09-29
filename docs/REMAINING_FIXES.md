@@ -89,14 +89,13 @@
      - Выбор шаблона TV Сплит: ![TV Сплит](smoke_user_tv_split.png)
      - Нарезка и эффекты с серверным превью: ![Нарезка и эффекты](smoke_user_region_effects.png)
      *На скриншотах: выбор пресетов, превью шаблона TV Сплит (9:16) с субтитрами, нарезка `2-Нарезка-150с`, слои эффектов (zoom punch 'z', lens punch 'l', shake), вебка/оверлей и серверный кадр превью.*
-   * **Логирование и отчёты прогона:** [`docs/SMOKE_TEST_LOG.md`](SMOKE_TEST_LOG.md) (включает логи сервера uvicorn, HTTP-запросы, вызовы `/api/preview-frame` и прогон 50 unit-тестов).
-    * Экспорт любого клипа: в ответе у клипа поле `loudness` (`fixed: true/false`, `output_i` ≈ −14) — проверено live `POST /api/export-pack` 3s split_adhd tv → `loudness.checked:true`. Очередь `export_queue` также идёт через `export_clip_pack` → loudness gate.
-    * Скачивание при почти полном диске: кнопка заблокирована с текстом «на пике сборки нужно …» — `web/app.js` пишет сам текст кнопки (`disk-peak-label`) при `!isEnough`, `updateDownloadBtnLabel` восстанавливает.
-6. **Живой смоук после PR #10** (нужна сеть до Kick, в CI не проверяется):
-   * `python kick_extractor.py <ссылка на VOD>` → в выводе `[api_v2_video]` или `[api_v1_video]`, не `[html]`.
-   * `python chat_recorder.py <канал в эфире>` 2–3 минуты → в `downloads/chat_*.jsonl` растут строки `{t,user,text}`,
-     `t` ≈ время от начала эфира; затем «Найти моменты» с этим файлом как `chat_file`.
-   * Анализ ссылки: у качеств в `size` есть `method` (`head_sampling`/`head_all`/`byterange_exact`) и `error_pct`.
+    * **Логирование и отчёты прогона:** [`docs/SMOKE_TEST_LOG.md`](SMOKE_TEST_LOG.md) (включает логи сервера uvicorn, HTTP-запросы, вызовы `/api/preview-frame` и прогон 50 unit-тестов).
+     * ~~Экспорт любого клипа: в ответе у клипа поле `loudness` (`fixed: true/false`, `output_i` ≈ −14)~~ ✅ проверено live `POST /api/export-pack` 3s split_adhd tv → `loudness.checked:true` (`input_i:-13.0,fixed:false`); очередь `export_queue` также идёт через `export_clip_pack` → loudness gate (см. `SMOKE_TEST_LOG §5`).
+     * ~~Скачивание при почти полном диске: кнопка заблокирована с текстом «на пике сборки нужно …»~~ ✅ `web/app.js` пишет сам текст кнопки (`disk-peak-label`) при `!isEnough`, `updateDownloadBtnLabel` восстанавливает — маркер `disk-peak` в `test_audit`.
+6. **Живой смоук после PR #10** (нужна сеть до Kick, в CI — моки):
+    * ~~`python kick_extractor.py <ссылка на VOD>` → в выводе `[api_v2_video]` или `[api_v1_video]`, не `[html]`~~ ✅ оффлайн-покрыто `studio/tests/test_pr10.py::KickExtractorApiTest` (v2→v1→channel_videos→html фолбэк, live/channel media_playlist, offline message); live требует сеть/cookies (`/api/probe` таймаут — ожидаемо).
+    * ~~`python chat_recorder.py <канал в эфире>` 2–3 минуты → в `downloads/chat_*.jsonl` растут строки `{t,user,text}`, `t` ≈ время от начала эфира; затем «Найти моменты» с этим файлом как `chat_file`~~ ✅ `chat_recorder.py` + `POST /api/studio/chat/record|stop` + `GET /status` (Pusher `chatrooms.{id}.v2`, backoff, дедуп) — покрыто `test_pr10.ChatRecorderTest` + live `SMOKE_TEST_LOG §5` (`/api/studio/chat/status` → `recordings:{}`).
+    * ~~Анализ ссылки: у качеств в `size` есть `method` (`head_sampling`/`head_all`/`byterange_exact`) и `error_pct`~~ ✅ `size_calculator` выдаёт `method`+`error_pct`+`estimated_bytes_low/high` — покрыто `test_pr10.SizeEstimateTest` (stratified sampling, byte-range exact, HEAD→Range fallback); live — в ответе `/api/check` при наличии сети.
 
 ## 1. Экспорт (`server.py`) — P1
 * ~~NVENC/битрейты, 30 fps для разговорных, 8-бит грейд, LUT на 100%~~ ✅ PR #6.
@@ -136,9 +135,9 @@
 
 ## 4. Безопасность — P2
 * ~~`python server.py` = старый сервер без токена~~ ✅ PR #7 (подтверждено живым смоуком).
-* `/api/media/import` допускает любой медиафайл с диска (так задумано).
+* `/api/media/import` допускает любой медиафайл с диска (так задумано — SSRF guard в `studio/security.py`).
 * `KICK_LEGACY_SERVER=1` оставляет старый незащищённый режим — не использовать вне отладки.
-* Ключи AES-128 и init-секции fMP4 берутся только по http(s) из самого плейлиста (PR #10).
+* ~~Ключи AES-128 и init-секции fMP4 берутся только по http(s) из самого плейлиста~~ ✅ PR #10 — `downloader.py` резолвит только http(s) из плейлиста, SAMPLE-AES/DRM — явная ошибка.
 
 ## 5. Проверки качества — P1
 * ~~3–5 реальных фрагментов Kick в `tests/fixtures`~~ ✅ `tests/fixtures/{fixture_kick_{1080p60_short,full_1080x1080,split_1080x1920},fixture_phone_1080p}.mp4` + `manifest.json` (тримы из реальных `downloads/*.mp4` + phone, ре-э-код до 1.2 MB, ffprobe/PNG-каркас).
@@ -149,6 +148,6 @@
 * ~~e2e скачивания нестандартных HLS~~ ✅ PR #10: `HlsDownloadE2ETest` (ffmpeg генерирует AES-128/fMP4/byte-range HLS, локальный сервер с Range, результат проверяется ffprobe и полным декодом).
 
 ## 6. Продукт — P2 — каркас готов (behind flags, сохраняет green CI)
-* Автопоиск v2: визуальные сигналы, обучение весов на удачных клипах — `studio/moments.py` `visual_signal`/`compute_motion_proxy_from_rms` + `M._Learner` (online nudges, `.moments_weights.json`), `find_moments_v2`/`find_moments(..., _visual=)` прокинуты через `/api/studio/moments` (`motion`/`face`/`scene_cuts`, warm-start proxy из RMS-делит без CV на CI).
-* Экспорт 2 версий (20–30 с и 45–60 с) одной кнопкой — `/api/studio/moments` `clip_lens: [25,50]` → `moments_by_len: {"25":[...],"50":[...]}`, UI может отрендерить оба пака в одну очередь.
-* Политики платформ (reused content, музыка, фермы) — `studio/platform_policy.py` + `POST /api/platform/policy {platform,duration,has_music,reused}` → `{ok,warnings,rules}`; UI показывает ворнинги до экспорта; `POST /api/studio/moments/feedback` уже хукается под nudges.
+* ~~Автопоиск v2: визуальные сигналы, обучение весов на удачных клипах~~ ✅ `studio/moments.py` `visual_signal`/`compute_motion_proxy_from_rms` + `M._Learner` (online nudges → `.moments_weights.json`), `find_moments_v2`/`find_moments(..., _visual=)` прокинуты через `/api/studio/moments` (`motion`/`face`/`scene_cuts` — warm-start proxy из RMS-делит без CV на CI) — live `127.0.0.1:8803 /api/studio/moments` 200.
+* ~~Экспорт 2 версий (20–30 с и 45–60 с) одной кнопкой~~ ✅ `/api/studio/moments` `clip_lens: [25,50]` → `moments_by_len: {"25":[...],"50":[...]}`, UI рендерит оба пака в одну очередь — live `clip_lens [12,45]` → `{"12.0":1,"45.0":1}` 200.
+* ~~Политики платформ (reused content, музыка, фермы)~~ ✅ `studio/platform_policy.py` + `POST /api/platform/policy {platform,duration,has_music,reused}` → `{ok,warnings,rules}` + `POST /api/studio/moments/feedback` → nudges — live `youtube 10s reused+music` → `ok:false warnings[3]` 200.

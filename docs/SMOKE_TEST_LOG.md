@@ -1,7 +1,7 @@
-# Smoke Test Log (PR #7 / PR #8 / PR #9 / PR #10 + e79d9c2/3a75b3e)
+# Smoke Test Log (PR #7 / PR #8 / PR #9 / PR #10 + e79d9c2/3a75b3e + §5–§6 closure)
 
-Дата: 2026-09-28 → 2026-09-29 (дополнен e79d9c2/3a75b3e)
-Окружение: Windows 11, Python 3.12, ffmpeg, Chrome / Electron Browser Subagent, Local Server (`127.0.0.1:8765` / `8788/8790` для API smoke).
+Дата: 2026-09-28 → 2026-09-29 (дополнен e79d9c2/3a75b3e + `050c5b4`/`90f3cc9` — закрытие §5–§6)
+Окружение: Windows 11, Python 3.12, ffmpeg, Chrome / Electron Browser Subagent, Local Server (`127.0.0.1:8765` / `8788`–`8803` для API smoke).
 
 ---
 
@@ -175,4 +175,11 @@ OK
     - Маркеры фронта на месте: `face-anchor-split`/`text-z-canvas`/`audio-master-clock` в `editor.js`+`canvasMonitor.js`, `disk-peak-label`/`chat-live-button` в `app.js`, `stickers`+`+Стикер` в editor lane, `glPasses`+`exporter` в `index.html`.
     - JS parse ok: `node --check editor.js/app.js/canvasMonitor.js` `0`.
     - `node web/core/selftest.js` — ALL CORE SELFTESTS PASSED; `overlay_export selftest: OK`; `selftest_audit.js` — ALL AUDIT SELFTESTS PASSED; `python -m unittest discover` — `Ran 71 tests in 35s OK`.
+6. **Закрытие REMAINING_FIXES §5–§6 (порт 8803, HEAD `050c5b4`→`90f3cc9`, 2026-09-29 11:48 UTC):**
+    - Фикстуры: `tests/fixtures/{fixture_kick_{1080p60_short,full_1080x1080,split_1080x1920},fixture_phone_1080p}.mp4` + `manifest.json` — тримы из `downloads/*.mp4` (`ffmpeg -c copy` fallback reencode, phone 960:-2 crf24); `manifest.json` — probe+sha256.
+    - `python -m unittest discover -s studio/tests -t .` → `Ran 79 tests in ~74s OK` (71→79: +4 `test_e2e_frames` +4 `test_smoke`).
+    - `python verify_all.py` → `ALL VERIFICATION CHECKS PASSED in 103.5s` (§7.1–§7.6; `HTMLParser`/`ast`/`TestClient` вместо grep — `index.html`+`export-queue`+`_sfx_maybe_file`/`int(float)` гейты зелёные).
+    - `tools/gl_equiv_test.js` headless (Win, `npx electron`): `{"ok":true,"jfa":1,"kawase":0,"lens":0.002...}` green (thresholds `jfa<=1 kawase<=0.5 lens<=0.02`); на CI — `xvfb-run -a npx electron`.
+    - Live `127.0.0.1:8803` (`X-Studio-Token`, `STUDIO_TOKEN=testtok124`): `POST /api/platform/policy {youtube,10,reused+music}` → `warnings[3] ok:false` 200; `POST /api/studio/moments/feedback {kept:[0],total:5}` → `ok:true` 200; `POST /api/studio/moments {clip_lens:[12,45]}` → `moments_by_len {"12.0":1,"45.0":1}` 200 (warm-start `visual_signal` из RMS).
+    - `tools/ci_check.sh` расширен GPU-ступенем (`xvfb-run` gate), `.github/workflows/ci.yml` — `ffmpeg`+`xvfb`+`npm ci` уже на CI.
 
