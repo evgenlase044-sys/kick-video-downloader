@@ -3061,7 +3061,12 @@ def _normalize_subtitle_mode(clip) -> None:
                     "и одновременно заполнен subtitles. Укажи subtitle_mode "
                     "(timeline|generated|none) или убери один из источников."))
     if mode == "timeline":
-        clip.subtitles = []
+        # timeline = ASR words from text_items win; but when the text track
+        # carries no ASR words (user transcribed yet never pressed
+        # "На слой титров"), wiping subtitles would silently drop the only
+        # subtitle source (UI always sends timeline) -> keep them instead.
+        if asr_items:
+            clip.subtitles = []
     elif mode == "generated":
         clip.text_items = [ti for ti in items if not (isinstance(ti, dict) and ti.get("words"))]
     elif mode == "none":
