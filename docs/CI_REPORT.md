@@ -68,7 +68,7 @@ web/index.html: {'already': 5, 'skipped': 1}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-29T05:41:15Z, 2ad25d2)
+# CI report (2026-09-29T08:15:37Z, 90f3cc9)
 
 ### ✅ python compile
 ```
@@ -139,40 +139,8 @@ web/index.html: {'already': 5, 'skipped': 1}
   already  overlay-export               marker present
 ```
 
-### ✅ python regression tests
+### ❌ python regression tests (exit 1)
 ```
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-ok
-test_slug_validation (studio.tests.test_pr10.ChatRecorderTest.test_slug_validation) ... ok
-test_aes128_slice_keeps_sequence_iv (studio.tests.test_pr10.HlsDownloadE2ETest.test_aes128_slice_keeps_sequence_iv)
-Sliced list starting at segment 2: IV must stay = original media sequence. ... ok
-test_aes128_ts (studio.tests.test_pr10.HlsDownloadE2ETest.test_aes128_ts) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:218: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpsjf1y2kn/aes.m3u8' mode='r' encoding='UTF-8'>
-  self.assertIn("METHOD=AES-128", open(os.path.join(self.root, "aes.m3u8")).read())
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-ok
-test_byterange_single_file (studio.tests.test_pr10.HlsDownloadE2ETest.test_byterange_single_file) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:248: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmppl6rhujj/b.m3u8' mode='r' encoding='UTF-8'>
-  text = open(os.path.join(self.root, "b.m3u8")).read()
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-ok
-test_fmp4 (studio.tests.test_pr10.HlsDownloadE2ETest.test_fmp4) ... /home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_pr10.py:240: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmpahd12_dn/f.m3u8' mode='r' encoding='UTF-8'>
-  self.assertIn("#EXT-X-MAP", open(os.path.join(self.root, "f.m3u8")).read())
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-ok
-test_plain_ts_still_concat (studio.tests.test_pr10.HlsDownloadE2ETest.test_plain_ts_still_concat) ... ok
-test_byterange_map_key_resolution (studio.tests.test_pr10.HlsParserV2Test.test_byterange_map_key_resolution) ... ok
-test_drm_is_rejected_clearly (studio.tests.test_pr10.HlsParserV2Test.test_drm_is_rejected_clearly) ... ok
-test_local_playlist_has_explicit_iv_and_map (studio.tests.test_pr10.HlsParserV2Test.test_local_playlist_has_explicit_iv_and_map) ... ok
-test_resume_key_tells_ranges_apart (studio.tests.test_pr10.HlsParserV2Test.test_resume_key_tells_ranges_apart) ... ok
-test_slice_keeps_segment_attributes (studio.tests.test_pr10.HlsParserV2Test.test_slice_keeps_segment_attributes) ... ok
-test_live_channel_and_media_playlist_as_source (studio.tests.test_pr10.KickExtractorApiTest.test_live_channel_and_media_playlist_as_source) ... ok
-test_offline_channel_message (studio.tests.test_pr10.KickExtractorApiTest.test_offline_channel_message) ... ok
-test_url_parsing (studio.tests.test_pr10.KickExtractorApiTest.test_url_parsing) ... ok
-test_v1_then_channel_videos_then_html (studio.tests.test_pr10.KickExtractorApiTest.test_v1_then_channel_videos_then_html) ... ok
-test_v2_video_api_first (studio.tests.test_pr10.KickExtractorApiTest.test_v2_video_api_first) ... ok
-test_head_refused_falls_back_to_ranged_get (studio.tests.test_pr10.SizeEstimateTest.test_head_refused_falls_back_to_ranged_get) ... ok
-test_short_playlist_is_exact (studio.tests.test_pr10.SizeEstimateTest.test_short_playlist_is_exact) ... ok
-test_stratified_sampling_is_accurate_and_bounded (studio.tests.test_pr10.SizeEstimateTest.test_stratified_sampling_is_accurate_and_bounded) ... ok
-test_export_wrapper_applies_gate_on_plain_exports (studio.tests.test_pr7.LoudnessGateTest.test_export_wrapper_applies_gate_on_plain_exports) ... ok
 test_loud_clip_true_peak_limited (studio.tests.test_pr7.LoudnessGateTest.test_loud_clip_true_peak_limited) ... ok
 test_no_audio_is_skipped (studio.tests.test_pr7.LoudnessGateTest.test_no_audio_is_skipped) ... ok
 test_on_target_clip_untouched (studio.tests.test_pr7.LoudnessGateTest.test_on_target_clip_untouched) ... ok
@@ -186,7 +154,6 @@ test_fx_anchor_exported (studio.tests.test_pr8.Pr8EditorTest.test_fx_anchor_expo
 test_patched_editor_parses (studio.tests.test_pr8.Pr8EditorTest.test_patched_editor_parses) ... ok
 test_patches_applied (studio.tests.test_pr8.Pr8EditorTest.test_patches_applied) ... ok
 test_preview_frame_has_no_undefined_token (studio.tests.test_pr8.Pr8EditorTest.test_preview_frame_has_no_undefined_token) ... ok
-[studio] server.py patches: {'already': 36, 'skipped': 1}
 test_lens_punch_is_animated (studio.tests.test_pr8.Pr8ExportFxTest.test_lens_punch_is_animated) ... ok
 test_mixed_chain_renders (studio.tests.test_pr8.Pr8ExportFxTest.test_mixed_chain_renders) ... ok
 test_zoom_anchor_moves_the_punch (studio.tests.test_pr8.Pr8ExportFxTest.test_zoom_anchor_moves_the_punch) ... ok
@@ -196,11 +163,44 @@ test_lens_and_blur_only_touch_their_window (studio.tests.test_pr9.Pr9FxTest.test
 test_lens_params_match_lens_js (studio.tests.test_pr9.Pr9FxTest.test_lens_params_match_lens_js) ... ok
 test_lens_parts_have_overscan_and_no_rgbashift (studio.tests.test_pr9.Pr9FxTest.test_lens_parts_have_overscan_and_no_rgbashift) ... ok
 test_split_top_h (studio.tests.test_pr9.Pr9FxTest.test_split_top_h) ... ok
+setUpClass (studio.tests.test_smoke.SmokeContractTest) ... ERROR
+
+======================================================================
+ERROR: setUpClass (studio.tests.test_e2e_frames.E2EFramesTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_e2e_frames.py", line 73, in setUpClass
+    from fastapi.testclient import TestClient
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py", line 1, in <module>
+    from starlette.testclient import TestClient as TestClient  # noqa
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/starlette/testclient.py", line 41, in <module>
+    raise RuntimeError(
+RuntimeError: The starlette.testclient module requires the httpx2 package to be installed.
+You can install this with:
+    $ pip install httpx2
+
+
+======================================================================
+ERROR: setUpClass (studio.tests.test_smoke.SmokeContractTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_smoke.py", line 27, in setUpClass
+    from fastapi.testclient import TestClient
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py", line 1, in <module>
+    from starlette.testclient import TestClient as TestClient  # noqa
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/starlette/testclient.py", line 41, in <module>
+    raise RuntimeError(
+RuntimeError: The starlette.testclient module requires the httpx2 package to be installed.
+You can install this with:
+    $ pip install httpx2
+
 
 ----------------------------------------------------------------------
-Ran 71 tests in 14.747s
+Ran 71 tests in 12.120s
 
-OK
+FAILED (errors=2)
 ```
 
 ### ✅ server imports with fixes (studio.loader)
@@ -218,7 +218,7 @@ OK
 
 ### ✅ studio API exposes chat recording (PR #10)
 ```
-['/api/studio/chat/record', '/api/studio/chat/status', '/api/studio/chat/stop', '/api/studio/moments', '/api/studio/templates', '/api/studio/templates/plan']
+['/api/platform/policy', '/api/studio/chat/record', '/api/studio/chat/status', '/api/studio/chat/stop', '/api/studio/moments', '/api/studio/moments/feedback', '/api/studio/templates', '/api/studio/templates/plan']
 ```
 
 ### ✅ web core selftest
@@ -310,6 +310,14 @@ ALL AUDIT SELFTESTS PASSED
 ### ✅ overlay export selftest
 ```
 overlay_export selftest: OK
+```
+
+### ❌ GPU equivalence (WebGL2 vs JS — JFA/Kawase/Lens) (exit 1)
+```
+npm warn exec The following package was not found and will be installed: electron@41.7.1
+npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+[5502:0929/081556.270519:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/chrome-sandbox is owned by root and has mode 4755.
+/home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/electron exited with signal SIGTRAP
 ```
 
 ### ✅ node --check web/editor.js
