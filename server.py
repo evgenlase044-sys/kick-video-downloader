@@ -1145,6 +1145,7 @@ class FxOverlay(BaseModel):
     z: int = 0                   # video-track index (0 = topmost track): the FX
                                  # affects only the composite built BELOW its track
     freq: float = 7.0            # shake frequency Hz (kind=shake)
+    mode: Optional[str] = None   # push direction: in (default) | out
     # studio:fx-anchor-fields - zoom anchor (template face), 0..1 of the output
     anchor_x: Optional[float] = None
     anchor_y: Optional[float] = None
@@ -1161,6 +1162,11 @@ class ExportLayer(BaseModel):
     pip: Optional[PipBox] = None             # None = fullscreen base behavior
     track_path: Optional[List[Dict[str, Any]]] = None  # [{t,x,y,w,h}] normalized
     z: int = 0                   # track index (0 = topmost), higher = deeper
+    # discipline card takeover: layer scales itself up from scale_from (0..1)
+    # to fullscreen over scale_in seconds at its out_start (card-in transition)
+    scale_from: Optional[float] = None
+    scale_in: float = 0.35
+    tint: Optional[str] = None   # none | red | bw | blue (duotone card look)
 
 
 class FxSound(BaseModel):
@@ -2252,6 +2258,18 @@ def _tv_grade_parts(src: str, dst: str, is_vertical: bool = True) -> List[str]:
     return [f"{src}{chain}{dst}"]
 
 
+def _tint_filters(tint: Optional[str]) -> str:
+    """Duotone look for discipline cards (grayscale luma mapped to one hue)."""
+    t = (tint or "none").lower()
+    if t == "bw":
+        return ",hue=s=0"
+    if t == "red":
+        return ",hue=s=0,colorchannelmixer=rr=1.05:gg=0.30:bb=0.32"
+    if t == "blue":
+        return ",hue=s=0,colorchannelmixer=rr=0.30:gg=0.55:bb=1.08"
+    return ""
+
+
 def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverlay],
                     out_w: int, out_h: int, total_dur: float, tag_prefix: str) -> str:
     """Burn FX overlay elements (flash / bars / shake) onto curr_v in order.
@@ -2321,16 +2339,19 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             _mb, curr_v = _studio.motion_blur_parts(curr_v, f"{tag_prefix}v{fi}z", _zb0, _zb1)
             filter_parts.extend(_mb)
         elif fx.kind == "push":
-            # discipline: slow linear push-in 1 -> 1+a over the whole window
-            # (Ken Burns for lifestyle clips / still cards), same anchored
-            # scale+overlay machinery as zoom but a linear ramp envelope.
+            # discipline: linear push over the whole window (Ken Burns for
+            # lifestyle clips / still cards), same anchored scale+overlay
+            # machinery as zoom but a linear ramp envelope. mode=out settles
+            # FROM the zoomed state back to 1 (alternate movement).
             a = max(0.02, min(0.5, float(fx.peak if fx.peak else 0.08)))
             ax = getattr(fx, "anchor_x", None)
             ay = getattr(fx, "anchor_y", None)
             ax = 0.5 if ax is None else max(0.0, min(1.0, float(ax)))
             ay = 0.5 if ay is None else max(0.0, min(1.0, float(ay)))
             prg = f"min(1\\,max(0\\,(t-{s0:.3f})/{max(1e-3, d):.3f}))"
-            zx = f"(1+{a:.4f}*{prg}*between(t\\,{s0:.3f}\\,{e0:.3f}))"
+            mode = (getattr(fx, "mode", None) or "in").lower()
+            ramp = prg if mode != "out" else f"(1-{prg})"
+            zx = f"(1+{a:.4f}*{ramp}*between(t\\,{s0:.3f}\\,{e0:.3f}))"
             ox = f"-max(0\\,min({out_w}*{zx}-{out_w}\\,{ax:.4f}*{out_w}*{zx}-{ax:.4f}*{out_w}))"
             oy = f"-max(0\\,min({out_h}*{zx}-{out_h}\\,{ay:.4f}*{out_h}*{zx}-{ay:.4f}*{out_h}))"
             filter_parts.append(
@@ -2773,20 +2794,47 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
                 filter_parts.append(f"{comp}[ovlL{li}]overlay=x='{x_full}':y='{y_full}':format=auto{en}[eoL{li}]")
                 comp = f"[eoL{li}]"
             else:
-                # Fullscreen / cover video overlay (B-roll or camera angle switch, not corner duplicate)
-                chain = f"[{src_i}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={out_w}:{out_h},format=rgba"
+                # Fullscreen / cover video overlay (B-roll, camera angle switch,
+                # or a discipline CARD taking over the screen while the video
+                # below keeps playing).
+                chain = f"[{src_i}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={out_w}:{out_h}"
+                chain += _tint_filters(L.tint)
+                chain += ",format=rgba"
                 if op < 0.99:
                     chain += f",colorchannelmixer=aa={op:g}"
                 o_start = max(0.0, float(L.out_start or 0.0))
                 o_end = min(total_dur, o_start + max(0.2, float(L.duration or total_dur)))
-                if o_start > 0.01:
-                    chain += f",setpts=PTS+{o_start:.3f}/TB"
-                filter_parts.append(chain + f"[ovlL{li}]")
-                en = ""
-                if o_start > 0.01 or o_end < total_dur - 0.01:
-                    en = f":enable='between(t,{o_start:.3f},{o_end:.3f})'"
-                filter_parts.append(f"{comp}[ovlL{li}]overlay=x=0:y=0:format=auto{en}[eoL{li}]")
-                comp = f"[eoL{li}]"
+                sf = L.scale_from if L.scale_from is not None else None
+                try:
+                    sf = float(sf) if sf is not None else None
+                except (TypeError, ValueError):
+                    sf = None
+                if sf is not None and 0.05 <= sf < 0.995:
+                    # card takeover: the animated scale runs BEFORE setpts so it
+                    # sees the layer's own local time (t starts at 0), then the
+                    # scaled stream is shifted onto the output timeline.
+                    dur_in = max(0.15, float(L.scale_in or 0.35))
+                    pgr = f"min(1\\,max(0\\,t/{dur_in:.3f}))"
+                    fsc = f"({sf:.4f}+(1-{sf:.4f})*(1-pow(1-{pgr}\\,3)))"
+                    filter_parts.append(
+                        chain
+                        + f",scale=w='2*trunc(iw*{fsc}/2+0.5)':h='2*trunc(ih*{fsc}/2+0.5)':"
+                          f"eval=frame:flags=lanczos+accurate_rnd,setpts=PTS+{o_start:.3f}/TB[ovlL{li}z]")
+                    en = ""
+                    if o_start > 0.01 or o_end < total_dur - 0.01:
+                        en = f":enable='between(t,{o_start:.3f},{o_end:.3f})'"
+                    filter_parts.append(
+                        f"{comp}[ovlL{li}z]overlay=x='(W-w)/2':y='(H-h)/2':eval=frame:format=auto{en}[eoL{li}]")
+                    comp = f"[eoL{li}]"
+                else:
+                    if o_start > 0.01:
+                        chain += f",setpts=PTS+{o_start:.3f}/TB"
+                    filter_parts.append(chain + f"[ovlL{li}]")
+                    en = ""
+                    if o_start > 0.01 or o_end < total_dur - 0.01:
+                        en = f":enable='between(t,{o_start:.3f},{o_end:.3f})'"
+                    filter_parts.append(f"{comp}[ovlL{li}]overlay=x=0:y=0:format=auto{en}[eoL{li}]")
+                    comp = f"[eoL{li}]"
         # this layer's own audio into the mix (audio-only pre-pass graph)
         if not L.muted and _source_has_audio(L.source_file):
             gain = max(0.0, min(3.0, float(L.volume if L.volume is not None else 1.0)))

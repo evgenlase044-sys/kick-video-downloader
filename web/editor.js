@@ -3413,8 +3413,11 @@
             const mc = resolvePackSource(r.startTime);
             if (!mc || !mc.media) return null;
             const a = convertTimelineToSourceTime(mc, r.startTime);
-            const b = convertTimelineToSourceTime(mc, r.startTime + r.duration);
-            if (!(b > a + 0.2)) return null;
+            // Multi-clip regions (discipline edits) run past this clip's source:
+            // the layered exporter only consumes `layers`, so b just needs to be
+            // a sane, increasing span — fall back to the region length.
+            let b = convertTimelineToSourceTime(mc, r.startTime + r.duration);
+            if (!(b > a + 0.2)) b = a + Math.max(0.3, r.duration);
             return { mc, a, b };
         }
         // FX overlays + sounds + timeline audio mapped into one region's output.
@@ -3446,6 +3449,8 @@
         }
         // Слои для экспорта: каждый видео-/имидж-элемент под нарезкой, снизу вверх.
         // z = индекс трека (0 = верхний трек). База = самый нижний активный клип.
+        // Все пересекающиеся клипы трека (последовательный таймлайн дисциплины
+        // раньше терял всё после первого клипа — экспортировались только 3 секунды).
         function collectRegionLayers(r) {
             const order = trackOrder();
             const layers = [];
@@ -3453,27 +3458,32 @@
                 const tid = order[zi];
                 const track = getTrack(tid);
                 if (!track || track.kind !== "video") continue;
-                const c = (state.tracks[tid] || []).find(x =>
+                const seq = (state.tracks[tid] || []).filter(x =>
                     x.media && !x.isFx &&
                     x.startTime < r.startTime + r.duration - 0.02 &&
                     x.startTime + x.duration > r.startTime + 0.02);
-                if (!c) continue;
-                const covS = Math.max(c.startTime, r.startTime);
-                const covE = Math.min(c.startTime + c.duration, r.startTime + r.duration);
-                const dur = covE - covS;
-                if (dur <= 0.05) continue;
-                layers.push({
-                    source_file: c.media.filename,
-                    src_offset: Math.max(0, (c.sourceOffset || 0) + (covS - c.startTime)),
-                    duration: dur,
-                    out_start: Math.max(0, covS - r.startTime),
-                    opacity: c.opacity != null ? c.opacity : 1.0,
-                    volume: c.volume != null ? c.volume : 1.0,
-                    muted: !!(getTrack(c.trackId) && getTrack(c.trackId).muted),
-                    pip: zi === order.length - 1 ? null : pipForClip(c),
-                    track_path: (c.trackPath && c.trackPath.length) ? c.trackPath : null,
-                    z: zi
-                });
+                seq.sort((a, b) => a.startTime - b.startTime);
+                for (const c of seq) {
+                    const covS = Math.max(c.startTime, r.startTime);
+                    const covE = Math.min(c.startTime + c.duration, r.startTime + r.duration);
+                    const dur = covE - covS;
+                    if (dur <= 0.05) continue;
+                    layers.push({
+                        source_file: c.media.filename,
+                        src_offset: Math.max(0, (c.sourceOffset || 0) + (covS - c.startTime)),
+                        duration: dur,
+                        out_start: Math.max(0, covS - r.startTime),
+                        opacity: c.opacity != null ? c.opacity : 1.0,
+                        volume: c.volume != null ? c.volume : 1.0,
+                        muted: !!(getTrack(c.trackId) && getTrack(c.trackId).muted),
+                        pip: zi === order.length - 1 ? null : pipForClip(c),
+                        track_path: (c.trackPath && c.trackPath.length) ? c.trackPath : null,
+                        scale_from: (c.discScaleFrom != null) ? c.discScaleFrom : null,
+                        scale_in: (c.discScaleIn != null) ? c.discScaleIn : 0.35,
+                        tint: c.discTint || null,
+                        z: zi
+                    });
+                }
             }
             return layers;
         }
@@ -4013,6 +4023,7 @@
                     bar_h: c.fxBarH || 120,
                     amp: c.fxAmp || 12,
                     freq: c.fxFreq || 7,
+                    mode: c.fxMode || null,
                     z: zi
                 };
                 // studio:fx-anchor-export - template face anchor (0..1 of the frame).
@@ -5432,9 +5443,9 @@
             const cut = nearestCutTo(state.currentTime);
             if (cut != null) seekTo(cut);
         }
-        const tid = ensureFxTrack();
+        const tid = (overrides && overrides.trackId) ? overrides.trackId : ensureFxTrack();
         const before = new Set(state.tracks[tid] || []);
-        addFxClip(kind, color);
+        addFxClip(kind, color, tid);
         const c = (state.tracks[tid] || []).find(x => !before.has(x));
         if (!c) return null;
         if (c.isFx && overrides) {
@@ -5538,8 +5549,8 @@
             showToast("Ошибка сохранения пресета: " + e.message, "err");
         }
     }
-    function addFxClip(kind, color) {
-        const tid = ensureFxTrack();
+    function addFxClip(kind, color, targetTid) {
+        const tid = targetTid || ensureFxTrack();
         ensureTracksInitialized();
         const fxKind = kind || "flash";
         const fxColor = fxKind === "flash" ? (color || "white") : (color || "white");
@@ -6427,6 +6438,8 @@
                 }
                 if (f.anchor) ov.anchor = f.anchor;
                 if (kind === "push") ov.fxPeak = f.amp != null ? Number(f.amp) : (f.peak != null ? Number(f.peak) : 0.08);
+                if (f.mode) ov.fxMode = f.mode;
+                if (f.trackId) ov.trackId = f.trackId;
                 state.currentTime = Math.max(0, base + s);
                 if (addEffectAtPlayhead(kind, f.color || "white", ov)) added++;  // studio:addfx-count
             }
@@ -6444,7 +6457,7 @@
 
     // ── Discipline edits: apply a server plan as a timeline project ──
     // plan: {clips:[{filename,src_in,duration,out_start}], cards:[...],
-    //        fx:[{kind,start,end,...}], sounds:[{kind,at,gain}], text:[...],
+    //        fx:[{kind,start,end,...,track:"video"|"cards"}], sounds:[...],
     //        music:{filename,offset,duration}, duration, format}
     window.Studio.applyDisciplinePlan = function (plan, opts) {
         if (!plan) return 0;
@@ -6459,7 +6472,15 @@
         const lib = state.mediaLibrary || [];
         const byName = (n) => lib.find(m => m && m.filename === n) || null;
         const vtid = firstVideoTrackId() || trackOrder()[0];
-        let placed = 0;
+        // cards live on their OWN track above the video so they can overlap
+        // the playing video (takeover) and carry their own FX z-level
+        let cardsTid = (videoTrackIds() || []).find(tid => /карточк/i.test((getTrack(tid) || {}).name || ""));
+        if (!cardsTid || cardsTid === vtid) {
+            cardsTid = addTrack("video");
+            const t = getTrack(cardsTid);
+            if (t) t.name = "Дисциплина · карточки";
+            renderTracksDOM();
+        }
         const putClip = (media, tid, start, dur, extra) => {
             if (!media) return null;
             const arr = trackClips(tid);
@@ -6470,6 +6491,11 @@
                 media: media, volume: (extra && extra.volume != null) ? extra.volume : 1.0,
                 opacity: 1.0, musicDuck: !!(extra && extra.musicDuck)
             };
+            if (extra) {
+                if (extra.scaleFrom) c.discScaleFrom = extra.scaleFrom;
+                if (extra.scaleIn) c.discScaleIn = extra.scaleIn;
+                if (extra.tint && extra.tint !== "none") c.discTint = extra.tint;
+            }
             arr.push(c);
             arr.sort((a, b) => a.startTime - b.startTime);
             state.tracks[tid] = arr;
@@ -6479,14 +6505,17 @@
             const m = byName(c.filename);
             if (!m) continue;
             putClip(m, vtid, Number(c.out_start) || 0, Number(c.duration) || 2, { srcIn: Number(c.src_in) || 0, volume: 0 });
-            placed++;
         }
         for (const c of (plan.cards || [])) {
             const name = c.kind === "pic" ? (c.file || c.filename) : c.filename;
             const m = byName(name);
             if (!m) continue;
-            putClip(m, vtid, Number(c.out_start) || 0, Number(c.duration) || 2, { srcIn: Number(c.src_in) || 0, volume: 0 });
-            placed++;
+            putClip(m, cardsTid, Number(c.out_start) || 0, Number(c.duration) || 2, {
+                srcIn: Number(c.src_in) || 0, volume: 0,
+                scaleFrom: Number(c.scale_from) || 0,
+                scaleIn: Number(c.scale_in) || 0,
+                tint: c.tint || "none"
+            });
         }
         if (plan.music && plan.music.filename) {
             const m = byName(plan.music.filename);
@@ -6497,7 +6526,51 @@
                 if (ac) ac.musicDuck = false;
             }
         }
-        // end-card text
+        // FX: built directly on the plan's target track (video/cards) so the
+        // exporter burns each effect at its own z level only.
+        const fxClip = (f) => {
+            const tid = f.track === "cards" ? cardsTid : vtid;
+            const dur = Math.max(0.05, (Number(f.end) || 0) - (Number(f.start) || 0));
+            const c = {
+                id: "fx_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+                trackId: tid, startTime: Math.max(0, Number(f.start) || 0),
+                duration: dur, sourceOffset: 0, sourceDuration: dur,
+                title: "", isFx: true, fxKind: f.kind || "flash",
+                fxColor: f.color || "white",
+                fxPeak: (f.peak != null) ? Number(f.peak) : ((f.amp != null) ? Number(f.amp) : 0.75),
+                fxSound: "none", fxGain: 1.0, fxBarH: 160,
+                fxAmp: (f.amp != null) ? Number(f.amp) : 12,
+                fxFreq: (f.freq != null) ? Number(f.freq) : 7,
+                fxMode: f.mode || null,
+                media: null, volume: 1.0, opacity: 1.0
+            };
+            c.title = fxLabel(c);
+            (state.tracks[tid] = state.tracks[tid] || []).push(c);
+            return c;
+        };
+        let fxAdded = 0;
+        if (Array.isArray(plan.fx)) {
+            for (const f of plan.fx) { if (f && f.kind) { fxClip(f); fxAdded++; } }
+            for (const tid of new Set([vtid, cardsTid])) {
+                if (state.tracks[tid]) state.tracks[tid].sort((a, b) => a.startTime - b.startTime);
+            }
+        }
+        if (Array.isArray(plan.sounds)) {
+            for (const s of plan.sounds) {
+                const at = Number(s.at) || 0;
+                let best = null, bestD = 0.6;
+                for (const c of allFxElements()) {
+                    const d = Math.abs((c.startTime || 0) - at);
+                    if (d < bestD) { bestD = d; best = c; }
+                }
+                if (best && s.kind && s.kind !== "none") {
+                    best.fxSound = s.kind;
+                    best.fxGain = (s.gain != null ? s.gain : 1.0);
+                    best.title = fxLabel(best);
+                }
+            }
+        }
+        // end-card text (planner v2 keeps text empty — slides carry the hook)
         const ttid = (typeof textTrackId === "function") ? textTrackId() : null;
         if (ttid && Array.isArray(plan.text)) {
             for (const t of plan.text) {
@@ -6517,29 +6590,6 @@
                 });
                 arr.sort((a, b) => a.startTime - b.startTime);
                 state.tracks[ttid] = arr;
-            }
-        }
-        // fx (+ hit sound on the pre-drop punch)
-        let fxAdded = 0;
-        if (Array.isArray(plan.fx) && plan.fx.length) {
-            fxAdded = window.studioAddFx(plan.fx.map(f => ({
-                kind: f.kind, start: f.start, end: f.end, color: f.color || "white",
-                amp: (f.amp != null ? f.amp : f.peak), peak: f.peak, freq: f.freq, anchor: f.anchor
-            })), 0) || 0;
-        }
-        if (Array.isArray(plan.sounds)) {
-            for (const s of plan.sounds) {
-                const at = Number(s.at) || 0;
-                let best = null, bestD = 0.6;
-                for (const c of allFxElements()) {
-                    const d = Math.abs((c.startTime || 0) - at);
-                    if (d < bestD) { bestD = d; best = c; }
-                }
-                if (best && s.kind && s.kind !== "none") {
-                    best.fxSound = s.kind;
-                    best.fxGain = (s.gain != null ? s.gain : 1.0);
-                    best.title = fxLabel(best);
-                }
             }
         }
         // clipper preset for discipline look
@@ -6567,8 +6617,9 @@
         if (typeof updateClipperUI === "function") updateClipperUI();
         seekTo(0);
         saveProject();
-        showToast(`Дисциплина: клипов ${placed}, эффектов ${fxAdded}`, "ok");
-        return placed;
+        const placedCount = (plan.clips || []).length + (plan.cards || []).length;
+        showToast(`Дисциплина: клипов ${placedCount}, эффектов ${fxAdded}`, "ok");
+        return placedCount;
     };
 
     document.addEventListener("studio:template-plan", (e) => {

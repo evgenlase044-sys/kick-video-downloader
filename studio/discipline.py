@@ -2,11 +2,18 @@
 
 Formula reverse-engineered from the user's reference outputs
 (video_2026-09-29_15-19-*.mp4, 576x1024@30, ~20s, one hardtekk track):
-  * fullscreen vertical, NO karaoke subtitles (still cards carry own text);
-  * 2-3 lifestyle VIDEO clips with a slow push-in, then hard-cut PICTURE
-    cards (~1.5-2.5s each, slight push) on the music beats;
-  * music is the ONLY audio (clip voices muted), same track every time;
-  * zoom punch right before the drop, tiny shake on peak hits, end card.
+  * fullscreen vertical, NO karaoke subtitles;
+  * intro: 2-5 lifestyle VIDEO clips hard-cut ON BEATS, each with a push-in
+    (alternating push-out), white flash on the internal cuts;
+  * THE signature transition at the drop: a still card pops in SMALL
+    (centered, ~0.2 of the frame) over the still-playing video and scales up
+    to fullscreen in ~1s (scale_from takeover);
+  * body: picture cards cut on beats, each with a small beat-pop
+    (0.85 -> 1.0), red/bw duotone tints for contrast against the video,
+    short video hits between them;
+  * outro: black typographic slides (hook word / repeated-word wall /
+    highlight end card) generated with PIL;
+  * music is the ONLY audio (clip voices muted), same track every time.
 
 Stills are materialized as short mp4 loops (2.5s) so the export pipeline
 (which expects video inputs) needs no changes.
@@ -22,6 +29,10 @@ from typing import Any, Dict, List, Optional, Tuple
 HOP_S = 0.1
 MIN_CUT_GAP = 0.8
 DEFAULT_MUSIC_BASENAME = "discipline_music.mp4"
+TAKEOVER_S = 1.0          # card grows from 0.2 to fullscreen over the video
+OUTRO_MAX_S = 6.0         # typographic slides block
+SLIDE_W, SLIDE_H = 1080, 1920
+ACCENT = (232, 255, 42)   # acid yellow (matches the app subtitle style)
 
 
 # ── music analysis ───────────────────────────────────────────────────
@@ -180,7 +191,7 @@ def ensure_music_track(source_path: str, downloads_dir: str,
     return out_name
 
 
-def still_to_loop(png_path: str, mp4_path: str, dur: float = 2.5, fps: int = 30) -> bool:
+def still_to_loop(png_path: str, mp4_path: str, dur: float = 6.0, fps: int = 30) -> bool:
     """One PNG -> short mp4 loop (export pipeline eats video, not images)."""
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-i", png_path,
            "-t", f"{dur:.2f}", "-r", str(fps),
@@ -194,14 +205,36 @@ def still_to_loop(png_path: str, mp4_path: str, dur: float = 2.5, fps: int = 30)
 
 
 # ── plan ─────────────────────────────────────────────────────────────
-def _fit_cuts(onsets: List[float], start: float, end: float, count: int) -> List[float]:
-    inside = [o for o in onsets if start + 0.3 < o < end - 0.3]
-    if len(inside) >= count:
-        # spread evenly
-        idx = [round(i * (len(inside) - 1) / max(1, count - 1)) for i in range(count)] if count > 1 else [0]
-        return [inside[i] for i in idx]
-    # fall back to even grid
-    return [round(start + (end - start) * (i + 1) / (count + 1), 2) for i in range(count)]
+def _snap_to_onset(t: float, onsets: List[float], tol: float = 0.6) -> float:
+    best, bd = None, tol
+    for o in onsets:
+        d = abs(o - t)
+        if d < bd:
+            bd, best = d, o
+    return round(best, 2) if best is not None else round(t, 2)
+
+
+def _merge_close(bounds: List[float], min_gap: float = 0.9) -> List[float]:
+    out: List[float] = []
+    for b in bounds:
+        if out and b - out[-1] < min_gap:
+            continue
+        out.append(b)
+    return out
+
+
+def _split_long_slots(bounds: List[float], max_slot: float = 4.5) -> List[float]:
+    """Sparse onsets must not leave multi-second static slots: subdivide."""
+    out: List[float] = []
+    for a, b in zip(bounds, bounds[1:]):
+        out.append(a)
+        gap = b - a
+        if gap > max_slot:
+            parts = int(math.ceil(gap / max_slot))
+            for k in range(1, parts):
+                out.append(round(a + gap * k / parts, 2))
+    out.append(bounds[-1])
+    return out
 
 
 def probe_duration(path: str) -> float:
@@ -213,93 +246,341 @@ def probe_duration(path: str) -> float:
         return 0.0
 
 
+def _video_hit(materials: List[Dict[str, Any]], k: int, slot: float,
+               reserve_tail: float = 0.0) -> Dict[str, Any]:
+    """A short video segment for slot seconds (varied src window, k = usage counter)."""
+    m = materials[k % len(materials)]
+    mdur = max(1.0, float(m.get("duration") or 10.0))
+    seg = min(slot, max(0.5, mdur - 0.2 - reserve_tail))
+    fracs = (0.15, 0.45, 0.75, 0.30)
+    frac = fracs[k % len(fracs)]
+    src_in = round(max(0.0, (mdur - seg - reserve_tail) * frac), 2)
+    return {"filename": m["filename"], "src_in": src_in, "mdur": mdur,
+            "duration": round(seg, 2)}
+
+
+def _src_tag(filename: str) -> str:
+    """'Download (1).mp4' -> 'download1' (matches still-loop name tags)."""
+    base = os.path.splitext(os.path.basename(filename))[0]
+    return "".join(c for c in base.lower() if c.isalnum())
+
+
+def _pick_takeover_pic(pics: List[str], last_clip_file: str) -> str:
+    """Takeover card must CONTRAST with the video it lands over: prefer a
+    still extracted from a different source material."""
+    if not pics:
+        return ""
+    want = _src_tag(last_clip_file or "")
+    for p in pics:
+        tag = _src_tag(p).replace("disciplinestill", "")
+        if want and not tag.startswith(want[:10]):
+            return p
+    return pics[0]
+
+
+# ── typographic slides (outro) ───────────────────────────────────────
+def _load_font(size: int):
+    from PIL import ImageFont
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for name in ("montserrat-montserrat-extrabold.ttf",
+                 "firasans-FiraSans-ExtraBold.ttf",
+                 "anton-Anton-Regular.ttf"):
+        p = os.path.join(here, "fonts", name)
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _fit_font(text: str, max_w: int, start_size: int) -> Any:
+    size = start_size
+    while size > 28:
+        f = _load_font(size)
+        try:
+            w = f.getbbox(text)[2] - f.getbbox(text)[0]
+        except Exception:
+            w = f.getsize(text)[0]
+        if w <= max_w:
+            return f
+        size = int(size * 0.92)
+    return _load_font(28)
+
+
+def _draw_center(draw, y: int, text: str, font, fill, max_w: int,
+                 highlight: bool = False) -> int:
+    try:
+        bb = font.getbbox(text)
+        w, h = bb[2] - bb[0], bb[3] - bb[1]
+    except Exception:
+        w, h = font.getsize(text)
+    x = (SLIDE_W - w) // 2
+    if highlight:
+        pad = 18
+        draw.rectangle([x - pad, y - pad, x + w + pad, y + h + pad], fill=ACCENT)
+        draw.text((x, y), text, font=font, fill=(10, 10, 10))
+    else:
+        draw.text((x, y), text, font=font, fill=(255, 255, 255))
+    return h
+
+
+def make_type_slides(work_dir: str, hook: str = "ДИСЦИПЛИНА",
+                     caption: str = "НАЧНИ СЕГОДНЯ") -> List[str]:
+    """Three black typographic slides (1080x1920): hook, repeated-word wall
+    with one highlighted row, end card with a yellow underline bar."""
+    from PIL import Image, ImageDraw
+    import zlib
+    os.makedirs(work_dir, exist_ok=True)
+    ascii_safe = "".join(c for c in (hook or "EDIT").upper() if c.isascii() and c.isalnum())[:12]
+    if len(ascii_safe) < 3:
+        ascii_safe = "s" + format(zlib.crc32((hook or "EDIT").encode("utf-8")) % 100000, "05d")
+    safe = ascii_safe
+    paths = []
+
+    def _save(img: "Image.Image", tag: str) -> str:
+        p = os.path.join(work_dir, f"discipline_slide_{safe}_{tag}.png")
+        img.save(p)
+        paths.append(p)
+        return p
+
+    hook_u = (hook or "ДИСЦИПЛИНА").upper().strip()
+
+    # 1. hook word, huge
+    img = Image.new("RGB", (SLIDE_W, SLIDE_H), (8, 8, 8))
+    d = ImageDraw.Draw(img)
+    f = _fit_font(hook_u, SLIDE_W - 160, 190)
+    _draw_center(d, SLIDE_H // 2 - 160, hook_u, f, (255, 255, 255), SLIDE_W - 160)
+    if caption:
+        fc = _load_font(44)
+        _draw_center(d, SLIDE_H // 2 + 140, caption.upper(), fc, (150, 155, 160), SLIDE_W - 200)
+    _save(img, "hook")
+
+    # 2. repeated-word wall, one highlighted row (CONSISTENCY-style)
+    img = Image.new("RGB", (SLIDE_W, SLIDE_H), (8, 8, 8))
+    d = ImageDraw.Draw(img)
+    rows = 7
+    fr = _fit_font(hook_u, SLIDE_W - 220, 92)
+    rh = 210
+    y0 = (SLIDE_H - rows * rh) // 2 + 80
+    for i in range(rows):
+        fade = max(0.10, 1.0 - i * (0.92 / rows))
+        y = y0 + i * rh
+        if i == 2:
+            _draw_center(d, y, hook_u, fr, (255, 255, 255), SLIDE_W - 220, highlight=True)
+        else:
+            col = int(255 * fade)
+            try:
+                d.text((SLIDE_W // 2, y), hook_u, font=fr, fill=(col, col, col), anchor="ma")
+            except Exception:
+                _draw_center(d, y, hook_u, fr, (col, col, col), SLIDE_W - 220)
+    _save(img, "wall")
+
+    # 3. end card: hook + yellow bar + caption
+    img = Image.new("RGB", (SLIDE_W, SLIDE_H), (8, 8, 8))
+    d = ImageDraw.Draw(img)
+    f = _fit_font(hook_u, SLIDE_W - 160, 168)
+    bb = f.getbbox(hook_u)
+    h = bb[3] - bb[1]
+    y = SLIDE_H // 2 - h // 2 - 40
+    _draw_center(d, y, hook_u, f, (255, 255, 255), SLIDE_W - 160)
+    pad = 70
+    d.rectangle([SLIDE_W // 2 - pad, y + h + 42, SLIDE_W // 2 + pad, y + h + 58], fill=ACCENT)
+    if caption:
+        fc = _load_font(48)
+        _draw_center(d, y + h + 130, caption.upper(), fc, (150, 155, 160), SLIDE_W - 200)
+    _save(img, "end")
+    return paths
+
+
+def _slide_loops(work_dir: str, hook: str, caption: str, dur: float = 1.6) -> List[str]:
+    """PNG slides -> mp4 loops in downloads/ (cached by name)."""
+    out = []
+    for png in make_type_slides(work_dir, hook, caption):
+        mp4 = os.path.splitext(png)[0] + ".mp4"
+        png_mtime = os.path.getmtime(png)
+        if not (os.path.exists(mp4) and os.path.getsize(mp4) > 1024
+                and os.path.getmtime(mp4) >= png_mtime):
+            if not still_to_loop(png, mp4, dur=dur):
+                continue
+        out.append(os.path.basename(mp4))
+    return out
+
+
 def plan_discipline(*, materials: List[Dict[str, Any]], music_file: str,
                     music_offset: float = 0.0, target_dur: float = 21.0,
                     n_pics: int = 4, hook_text: str = "ДИСЦИПЛИНА",
                     pic_loops: Optional[List[str]] = None,
                     push_peak: float = 0.08,
-                    analysis: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Build the edit: video part -> picture cards on beats -> end card.
+                    analysis: Optional[Dict[str, Any]] = None,
+                    work_dir: Optional[str] = None,
+                    slide_caption: str = "НАЧНИ СЕГОДНЯ") -> Dict[str, Any]:
+    """Build the edit: beat-cut videos -> card takeover on the drop -> beat
+    cards with tints -> typographic outro.
 
     materials: [{filename, duration}] (files live in downloads/).
-    Returns timeline-ready spec: clips, pics, fx, text, music, region.
+    Returns timeline-ready spec: clips (base track), cards (cards track,
+    with scale_from/scale_in/tint), fx (per track), sounds, music.
     """
     target_dur = max(8.0, min(60.0, float(target_dur or 21.0)))
-    onsets = list((analysis or {}).get("onsets") or [])
+    onsets = [float(o) + music_offset for o in ((analysis or {}).get("onsets") or [])]
     drop = float((analysis or {}).get("drop") or 8.0) + music_offset
     drop = max(4.0, min(target_dur - 6.0, drop))
 
-    # part A: video clips fill [0, drop]; part B: cards fill [drop, target]
-    part_a = drop
-    n_vid = max(1, min(3, len(materials)))
-    # spread materials over part A
-    clips = []
-    t = 0.0
-    per = part_a / n_vid
-    for i in range(n_vid):
-        m = materials[i % len(materials)]
-        mdur = max(1.0, float(m.get("duration") or 10.0))
-        seg = min(per, mdur)
-        # take from the middle when the file is longer than the slot
-        src_in = round(max(0.0, (mdur - seg) / 2.0), 2) if mdur > seg else 0.0
-        clips.append({"filename": m["filename"], "src_in": src_in,
-                      "duration": round(seg, 2), "out_start": round(t, 2)})
-        t += seg
-    # stretch last clip to exactly drop (avoid gaps)
-    if clips:
-        clips[-1]["duration"] = round(drop - clips[-1]["out_start"], 2)
+    fx: List[Dict[str, Any]] = []
+    sounds: List[Dict[str, Any]] = []
+    clips: List[Dict[str, Any]] = []
+    cards: List[Dict[str, Any]] = []
 
-    # part B: alternate pic cards and short video hits on beats
-    pics = list(pic_loops or [])
-    cuts = _fit_cuts([o + music_offset for o in onsets], drop, target_dur,
-                     max(1, len(pics)))
-    cards = []
-    t = drop
-    bounds = [drop] + cuts + [target_dur]
+    # ── outro slides first: they decide where part B ends ───────────────
+    slides: List[str] = []
+    if work_dir:
+        try:
+            slides = _slide_loops(work_dir, hook_text or "ДИСЦИПЛИНА", slide_caption)
+        except Exception:
+            slides = []
+    outro_len = min(OUTRO_MAX_S, max(3.5, target_dur * 0.28)) if slides else 0.0
+    outro_start = target_dur - outro_len
+
+    # ── part A: beat-cut video intro [0, drop] ──────────────────────────
+    pre_onsets = [o for o in onsets if 0.6 < o < drop - 0.4]
+    n_seg = max(2, min(5, int(drop / 2.0)))
+    bounds = [0.0]
+    for i in range(1, n_seg):
+        bounds.append(_snap_to_onset(drop * i / n_seg, pre_onsets))
+    bounds = _merge_close(sorted(set(bounds + [drop])))
+    if bounds[-1] < drop:
+        bounds.append(drop)
+    seg_reserve = TAKEOVER_S + 0.5
     for i in range(len(bounds) - 1):
-        s, e = round(bounds[i], 2), round(bounds[i + 1], 2)
-        if e - s < 0.5:
+        s, e = bounds[i], bounds[i + 1]
+        if e - s < 0.6:
             continue
-        if pics and i % 2 == 0:
-            cards.append({"kind": "pic", "file": pics[(i // 2) % len(pics)],
-                          "out_start": s, "duration": round(e - s, 2)})
-        else:
-            m = materials[(i + n_vid) % len(materials)]
-            mdur = max(1.0, float(m.get("duration") or 10.0))
-            seg = min(e - s, mdur)
-            src_in = round(max(0.0, (mdur - seg) / 2.0), 2) if mdur > seg else 0.0
-            cards.append({"kind": "video", "filename": m["filename"],
-                          "src_in": src_in, "out_start": s,
-                          "duration": round(seg, 2)})
-
-    fx = []
-    # slow push on every video clip + pic card
+        hit = _video_hit(materials, i, e - s,
+                         reserve_tail=seg_reserve if i == len(bounds) - 2 else 0.0)
+        seg = min(e - s, max(0.5, hit["duration"]))
+        clips.append({"filename": hit["filename"], "src_in": hit["src_in"],
+                      "duration": round(seg, 2), "out_start": round(s, 2)})
+    # the last intro clip keeps playing UNDER the takeover card
+    if clips:
+        last = clips[-1]
+        room = max(0.0, last.get("mdur", 10.0) - last["src_in"] - last["duration"])
+        extra = min(TAKEOVER_S + 0.4, room)
+        last["duration"] = round(last["duration"] + extra, 2)
     for c in clips:
-        fx.append({"kind": "push", "start": c["out_start"],
+        c.pop("mdur", None)
+    # push on every intro clip (alternating in/out) + flash/whoosh on cuts
+    for i, c in enumerate(clips):
+        fx.append({"kind": "push", "mode": "in" if i % 2 == 0 else "out",
+                   "start": c["out_start"],
                    "end": round(c["out_start"] + c["duration"], 2),
-                   "peak": push_peak})
-    for c in cards:
-        fx.append({"kind": "push", "start": c["out_start"],
-                   "end": round(c["out_start"] + c["duration"], 2),
-                   "peak": push_peak + 0.02})
-    # punch right before the drop + shake on the first card hit
+                   "peak": round(push_peak + 0.03 + (i % 2) * 0.02, 3),
+                   "track": "video"})
+    for b in bounds[1:-1]:
+        fx.append({"kind": "flash", "start": round(max(0.0, b - 0.06), 2),
+                   "end": round(b + 0.07, 2), "peak": 0.85, "color": "white",
+                   "track": "video"})
+        sounds.append({"kind": "whoosh", "at": round(b, 2), "gain": 0.7})
+    # pre-drop zoom punch + riser into the drop
     fx.append({"kind": "zoom", "start": round(max(0.0, drop - 0.55), 2),
-               "end": round(drop - 0.05, 2), "peak": 0.16})
-    if cards:
-        fx.append({"kind": "shake", "start": cards[0]["out_start"],
-                   "end": round(cards[0]["out_start"] + 0.35, 2),
-                   "amp": 12, "freq": 8})
-    sounds = [{"kind": "hit_small", "at": round(max(0.0, drop - 0.55), 2), "gain": 1.0}]
+               "end": round(drop - 0.05, 2), "peak": 0.17, "track": "video"})
+    sounds.append({"kind": "riser", "at": round(max(0.0, drop - 1.3), 2), "gain": 0.8})
+    sounds.append({"kind": "boom", "at": round(drop, 2), "gain": 1.2})
 
-    text = []
-    if hook_text:
-        text.append({"text": hook_text, "start": round(target_dur - 2.6, 2),
-                     "end": round(target_dur - 0.1, 2), "x": 0.5, "y": 0.5,
-                     "size": 84, "anim_in": "pop", "anim_out": "fade"})
+    # ── drop takeover: first card pops in small over the playing video ──
+    pics = list(pic_loops or [])
+    tints = ["none", "red", "bw", "blue"]
+    takeover = None
+    first_end = _snap_to_onset(drop + 2.2,
+                               [o for o in onsets if drop + 1.4 < o < outro_start - 0.5],
+                               tol=0.7)
+    first_end = min(max(first_end, drop + 1.8), outro_start - 0.4)
+    if pics:
+        pic0 = _pick_takeover_pic(pics, clips[-1]["filename"] if clips else "")
+        takeover = {"kind": "pic", "file": pic0, "src_in": 0,
+                    "out_start": round(drop, 2),
+                    "duration": round(first_end - drop, 2),
+                    "scale_from": 0.20, "scale_in": TAKEOVER_S,
+                    "tint": "none", "layer": "cards"}
+        cards.append(takeover)
+        fx.append({"kind": "shake", "start": round(drop, 2),
+                   "end": round(drop + 0.45, 2), "amp": 14, "freq": 8,
+                   "track": "cards"})
+
+    # ── part B: beat cards + video hits [first_end, outro_start] ───────
+    bo = [o for o in onsets if drop + 2.6 < o < outro_start - 0.7]
+    step = max(1, len(bo) // max(2, n_pics * 2))
+    bo = bo[::step][:max(2, n_pics + 2)]
+    bbounds = _merge_close([round(drop, 2)] + [round(o, 2) for o in bo]
+                           + [round(outro_start, 2)], min_gap=1.1)
+    if bbounds[-1] < outro_start - 0.4:
+        bbounds.append(round(outro_start, 2))
+    if takeover:
+        # the takeover card IS the first slot; later bounds must clear it
+        bbounds = ([round(drop, 2), round(first_end, 2)]
+                   + [b for b in bbounds[1:] if b > first_end + 0.6])
+    # sparse onsets must not leave long static slots (visual monotony)
+    bbounds = _split_long_slots(bbounds, max_slot=2.8)
+    hit_k = len(clips)
+    card_k = 1
+    vid_k = 0
+    slot_from = 0 if not takeover else 1
+    for i in range(slot_from, len(bbounds) - 1):
+        s, e = bbounds[i], bbounds[i + 1]
+        if e - s < 0.7:
+            continue
+        slot_tint = tints[i % len(tints)]   # adjacent slots never repeat
+        use_video = (i % 3 == 2) or (not pics and materials)
+        if use_video and materials:
+            hit = _video_hit(materials, hit_k, e - s)
+            hit_k += 1
+            vid_k += 1
+            cards.append({"kind": "video", "filename": hit["filename"],
+                          "src_in": hit["src_in"], "out_start": round(s, 2),
+                          "duration": round(e - s, 2),
+                          "scale_from": 0.0, "scale_in": 0.0,
+                          "tint": slot_tint, "layer": "cards"})
+            fx.append({"kind": "push", "start": round(s, 2),
+                       "end": round(e, 2), "peak": 0.16, "track": "cards"})
+            sounds.append({"kind": "whoosh", "at": round(s, 2), "gain": 0.6})
+        else:
+            card = (pics[card_k % len(pics)] if pics else None)
+            entry = {"kind": "pic" if card else "video",
+                     "file": card, "filename": None if card else materials[0]["filename"],
+                     "src_in": 0 if card else 0.0,
+                     "out_start": round(s, 2), "duration": round(e - s, 2),
+                     "scale_from": 0.85, "scale_in": 0.28,
+                     "tint": slot_tint, "layer": "cards"}
+            if not card:
+                mh = _video_hit(materials, hit_k, e - s)
+                entry["filename"] = mh["filename"]
+                entry["src_in"] = mh["src_in"]
+            cards.append(entry)
+            card_k += 1
+            fx.append({"kind": "flash", "start": round(max(0.0, s - 0.05), 2),
+                       "end": round(s + 0.08, 2), "peak": 0.30, "color": "white",
+                       "track": "cards"} if card_k % 2 == 0 else
+                      {"kind": "push", "start": round(s, 2),
+                       "end": round(e, 2), "peak": 0.10, "track": "cards"})
+            sounds.append({"kind": "hit_small", "at": round(s, 2), "gain": 0.9})
+
+    # ── outro: typographic slides on black (slides were made first) ─────
+    if slides:
+        n_slides = len(slides)
+        sl = (target_dur - outro_start) / n_slides
+        for i, name in enumerate(slides):
+            s = outro_start + i * sl
+            cards.append({"kind": "pic", "file": name, "src_in": 0,
+                          "out_start": round(s, 2), "duration": round(sl, 2),
+                          "scale_from": 0.90, "scale_in": 0.25,
+                          "tint": "none", "layer": "cards"})
+            sounds.append({"kind": "boom" if i == n_slides - 1 else "hit_small",
+                           "at": round(s, 2), "gain": 1.0 if i == n_slides - 1 else 0.7})
+        # hard cut into the outro (no flash): the black slide IS the cut
 
     return {"format": "fullscreen", "fps": 30, "duration": round(target_dur, 2),
             "drop": round(drop, 2), "clips": clips, "cards": cards,
-            "fx": fx, "sounds": sounds, "text": text,
+            "fx": fx, "sounds": sounds, "text": [], "slides": slides,
             "music": {"filename": os.path.basename(music_file),
                       "offset": round(music_offset, 2), "duration": round(target_dur, 2)},
             "subtitle_mode": "none"}

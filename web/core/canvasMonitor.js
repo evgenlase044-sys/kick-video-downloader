@@ -381,19 +381,41 @@
             if (cv.readyState < 2) continue;
             this._syncTime(cv, c, tSrc, s);
             const isPip = c.isPip || c.pipBox || (c.trackPath && c.trackPath.length);
-            if (!isPip) continue;
-            const box = this.hooks.trackBoxFor(c, tSrc);
-            const src = box
-                ? { sx: box.x * (cv.videoWidth || 1), sy: box.y * (cv.videoHeight || 1),
-                    sw: box.w * (cv.videoWidth || 1), sh: box.h * (cv.videoHeight || 1) }
-                : { sx: 0, sy: 0, sw: cv.videoWidth || 1, sh: cv.videoHeight || 1 };
-            const pr = GEO.pipRect(outW, outH, this.hooks.pipBoxFor(c));
-            const dst = GEO.coverInto(src, pr.dx, pr.dy, pr.dw, pr.dh);
+            if (isPip) {
+                const box = this.hooks.trackBoxFor(c, tSrc);
+                const src = box
+                    ? { sx: box.x * (cv.videoWidth || 1), sy: box.y * (cv.videoHeight || 1),
+                        sw: box.w * (cv.videoWidth || 1), sh: box.h * (cv.videoHeight || 1) }
+                    : { sx: 0, sy: 0, sw: cv.videoWidth || 1, sh: cv.videoHeight || 1 };
+                const pr = GEO.pipRect(outW, outH, this.hooks.pipBoxFor(c));
+                const dst = GEO.coverInto(src, pr.dx, pr.dy, pr.dw, pr.dh);
+                w.save();
+                w.beginPath();
+                w.roundRect(pr.dx, pr.dy, pr.dw, pr.dh, Math.round(0.02 * outW));
+                w.clip();
+                w.drawImage(cv, dst.sx, dst.sy, dst.sw, dst.sh, dst.dx, dst.dy, dst.dw, dst.dh);
+                w.restore();
+                continue;
+            }
+            // fullscreen upper layer (discipline card takeover): cover-draw with
+            // the same scale-in (discScaleFrom -> 1 over discScaleIn, easeOutCubic)
+            // and duotone tint as the export overlay.
+            const sf = (c.discScaleFrom != null) ? Math.max(0.05, Math.min(0.995, Number(c.discScaleFrom) || 0)) : null;
+            const inDur = Math.max(0.15, Number(c.discScaleIn) || 0.35);
+            let f = 1;
+            if (sf !== null && t >= c.startTime) {
+                const p = Math.max(0, Math.min(1, (t - c.startTime) / inDur));
+                f = sf + (1 - sf) * (1 - Math.pow(1 - p, 3));
+            } else if (sf !== null && t < c.startTime) {
+                continue;   // not started yet
+            }
+            const src = { sx: 0, sy: 0, sw: cv.videoWidth || 1, sh: cv.videoHeight || 1 };
+            const dst = GEO.coverInto(src, 0, 0, outW, outH);
+            const cw = dst.dw * f, ch = dst.dh * f;
+            const cx = (outW - cw) / 2, cy = (outH - ch) / 2;
             w.save();
-            w.beginPath();
-            w.roundRect(pr.dx, pr.dy, pr.dw, pr.dh, Math.round(0.02 * outW));
-            w.clip();
-            w.drawImage(cv, dst.sx, dst.sy, dst.sw, dst.sh, dst.dx, dst.dy, dst.dw, dst.dh);
+            w.filter = this._tintCss(c.discTint);
+            w.drawImage(cv, dst.sx, dst.sy, dst.sw, dst.sh, cx, cy, cw, ch);
             w.restore();
         }
         w.restore();
@@ -472,6 +494,16 @@
                     this._seekPending.delete(video);
                 }
             }
+        }
+    };
+
+    /** Duotone tint parity with the export's _tint_filters (approximate). */
+    CanvasMonitor.prototype._tintCss = function (tint) {
+        switch ((tint || "none").toLowerCase()) {
+            case "bw": return "grayscale(1)";
+            case "red": return "grayscale(1) sepia(1) hue-rotate(-40deg) saturate(3.2) brightness(0.95)";
+            case "blue": return "grayscale(1) sepia(1) hue-rotate(170deg) saturate(2.6)";
+            default: return "none";
         }
     };
 
