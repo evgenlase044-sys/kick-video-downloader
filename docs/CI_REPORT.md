@@ -68,7 +68,7 @@ web/index.html: {'already': 5, 'skipped': 1}
   already  overlay-export               marker present
 ```
 
-# CI report (2026-09-29T14:38:50Z, daf8bec)
+# CI report (2026-09-29T16:16:15Z, 6fe3a76)
 
 ### ✅ python compile
 ```
@@ -141,14 +141,6 @@ web/index.html: {'already': 5, 'skipped': 1}
 
 ### ❌ python regression tests (exit 1)
 ```
-test_loud_clip_true_peak_limited (studio.tests.test_pr7.LoudnessGateTest.test_loud_clip_true_peak_limited) ... ok
-test_no_audio_is_skipped (studio.tests.test_pr7.LoudnessGateTest.test_no_audio_is_skipped) ... ok
-test_on_target_clip_untouched (studio.tests.test_pr7.LoudnessGateTest.test_on_target_clip_untouched) ... ok
-test_quiet_clip_is_normalized_and_video_kept (studio.tests.test_pr7.LoudnessGateTest.test_quiet_clip_is_normalized_and_video_kept) ... ok
-test_editor_patches (studio.tests.test_pr7.Pr7PatchesTest.test_editor_patches) ... ok
-test_gl_lens_shader_has_no_debug_output (studio.tests.test_pr7.Pr7PatchesTest.test_gl_lens_shader_has_no_debug_output) ... ok
-test_server_patches (studio.tests.test_pr7.Pr7PatchesTest.test_server_patches) ... ok
-test_collectors_live_outside_initClipperPanel (studio.tests.test_pr8.Pr8EditorTest.test_collectors_live_outside_initClipperPanel) ... ok
 test_face_anchor_is_normalized_object (studio.tests.test_pr8.Pr8EditorTest.test_face_anchor_is_normalized_object) ... ok
 test_fx_anchor_exported (studio.tests.test_pr8.Pr8EditorTest.test_fx_anchor_exported) ... ok
 test_patched_editor_parses (studio.tests.test_pr8.Pr8EditorTest.test_patched_editor_parses) ... ok
@@ -197,10 +189,18 @@ You can install this with:
     $ pip install httpx2
 
 
+======================================================================
+FAIL: test_slides_generated_and_placed (studio.tests.test_discipline.DisciplinePlanTest.test_slides_generated_and_placed)
 ----------------------------------------------------------------------
-Ran 77 tests in 14.904s
+Traceback (most recent call last):
+  File "/home/runner/work/kick-video-downloader/kick-video-downloader/studio/tests/test_discipline.py", line 95, in test_slides_generated_and_placed
+    self.assertEqual(len(p["slides"]), 3)
+AssertionError: 0 != 3
 
-FAILED (errors=2)
+----------------------------------------------------------------------
+Ran 79 tests in 16.534s
+
+FAILED (failures=1, errors=2)
 ```
 
 ### ✅ server imports with fixes (studio.loader)
@@ -316,7 +316,7 @@ overlay_export selftest: OK
 ```
 npm warn exec The following package was not found and will be installed: electron@41.7.1
 npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
-[5559:0929/143913.157985:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/chrome-sandbox is owned by root and has mode 4755.
+[5635:0929/161640.999718:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/chrome-sandbox is owned by root and has mode 4755.
 /home/runner/.npm/_npx/1323dbbc85759269/node_modules/electron/dist/electron exited with signal SIGTRAP
 ```
 
