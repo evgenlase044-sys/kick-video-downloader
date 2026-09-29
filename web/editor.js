@@ -6426,6 +6426,7 @@
                     if (f.freq != null) ov.fxFreq = Number(f.freq);
                 }
                 if (f.anchor) ov.anchor = f.anchor;
+                if (kind === "push") ov.fxPeak = f.amp != null ? Number(f.amp) : (f.peak != null ? Number(f.peak) : 0.08);
                 state.currentTime = Math.max(0, base + s);
                 if (addEffectAtPlayhead(kind, f.color || "white", ov)) added++;  // studio:addfx-count
             }
@@ -6439,6 +6440,135 @@
         syncVideoToCurrentTime();
         saveProject();
         return added;
+    };
+
+    // ── Discipline edits: apply a server plan as a timeline project ──
+    // plan: {clips:[{filename,src_in,duration,out_start}], cards:[...],
+    //        fx:[{kind,start,end,...}], sounds:[{kind,at,gain}], text:[...],
+    //        music:{filename,offset,duration}, duration, format}
+    window.Studio.applyDisciplinePlan = function (plan, opts) {
+        if (!plan) return 0;
+        const o = opts || {};
+        ensureTracksInitialized();
+        if (o.clear) {
+            for (const tid of trackOrder()) state.tracks[tid] = [];
+            state.regions = [];
+            state.selectedRegionId = null;
+            state.selectedClipId = null;
+        }
+        const lib = state.mediaLibrary || [];
+        const byName = (n) => lib.find(m => m && m.filename === n) || null;
+        const vtid = firstVideoTrackId() || trackOrder()[0];
+        let placed = 0;
+        const putClip = (media, tid, start, dur, extra) => {
+            if (!media) return null;
+            const arr = trackClips(tid);
+            const c = {
+                id: "clip_" + Date.now().toString(36) + "_" + Math.floor(Math.random() * 1e6),
+                trackId: tid, startTime: start, duration: dur,
+                sourceOffset: (extra && extra.srcIn) || 0, sourceDuration: dur,
+                media: media, volume: (extra && extra.volume != null) ? extra.volume : 1.0,
+                opacity: 1.0, musicDuck: !!(extra && extra.musicDuck)
+            };
+            arr.push(c);
+            arr.sort((a, b) => a.startTime - b.startTime);
+            state.tracks[tid] = arr;
+            return c;
+        };
+        for (const c of (plan.clips || [])) {
+            const m = byName(c.filename);
+            if (!m) continue;
+            putClip(m, vtid, Number(c.out_start) || 0, Number(c.duration) || 2, { srcIn: Number(c.src_in) || 0, volume: 0 });
+            placed++;
+        }
+        for (const c of (plan.cards || [])) {
+            const name = c.kind === "pic" ? (c.file || c.filename) : c.filename;
+            const m = byName(name);
+            if (!m) continue;
+            putClip(m, vtid, Number(c.out_start) || 0, Number(c.duration) || 2, { srcIn: Number(c.src_in) || 0, volume: 0 });
+            placed++;
+        }
+        if (plan.music && plan.music.filename) {
+            const m = byName(plan.music.filename);
+            if (m) {
+                const auds = (typeof audioTrackIds === "function") ? audioTrackIds() : [];
+                const atid = auds.length ? auds[auds.length - 1] : trackOrder()[0];
+                const ac = putClip(m, atid, 0, Number(plan.duration) || 20, { srcIn: Number(plan.music.offset) || 0, volume: 1.0 });
+                if (ac) ac.musicDuck = false;
+            }
+        }
+        // end-card text
+        const ttid = (typeof textTrackId === "function") ? textTrackId() : null;
+        if (ttid && Array.isArray(plan.text)) {
+            for (const t of plan.text) {
+                const arr = trackClips(ttid);
+                arr.push({
+                    id: "text_" + Date.now().toString(36) + Math.floor(Math.random() * 1e3),
+                    trackId: ttid, startTime: Number(t.start) || 0,
+                    duration: Math.max(0.5, (Number(t.end) || 2) - (Number(t.start) || 0)),
+                    sourceOffset: 0, sourceDuration: 2, title: t.text || "",
+                    isText: true, freeText: true,
+                    textFont: "Montserrat ExtraBold", textSize: 6.0,
+                    textGlow: 60, textColor: "#ffffff",
+                    textAnimIn: t.anim_in || "pop", textAnimOut: t.anim_out || "fade",
+                    textX: t.x != null ? t.x : 0.5, textY: t.y != null ? t.y : 0.5,
+                    textShake: false, media: null, volume: 1.0, opacity: 1.0,
+                    subtitleStyle: "acid"
+                });
+                arr.sort((a, b) => a.startTime - b.startTime);
+                state.tracks[ttid] = arr;
+            }
+        }
+        // fx (+ hit sound on the pre-drop punch)
+        let fxAdded = 0;
+        if (Array.isArray(plan.fx) && plan.fx.length) {
+            fxAdded = window.studioAddFx(plan.fx.map(f => ({
+                kind: f.kind, start: f.start, end: f.end, color: f.color || "white",
+                amp: (f.amp != null ? f.amp : f.peak), peak: f.peak, freq: f.freq, anchor: f.anchor
+            })), 0) || 0;
+        }
+        if (Array.isArray(plan.sounds)) {
+            for (const s of plan.sounds) {
+                const at = Number(s.at) || 0;
+                let best = null, bestD = 0.6;
+                for (const c of allFxElements()) {
+                    const d = Math.abs((c.startTime || 0) - at);
+                    if (d < bestD) { bestD = d; best = c; }
+                }
+                if (best && s.kind && s.kind !== "none") {
+                    best.fxSound = s.kind;
+                    best.fxGain = (s.gain != null ? s.gain : 1.0);
+                    best.title = fxLabel(best);
+                }
+            }
+        }
+        // clipper preset for discipline look
+        state.clipper.format = plan.format || "fullscreen";
+        state.clipper.colorGrade = "tv";
+        state.clipper.flashCuts = false;
+        state.clipper.hotWords = false;
+        state.clipper.subtitleTemplate = "acid";
+        // one region over the whole edit
+        const r = {
+            id: "rg_disc_" + Date.now().toString(36),
+            name: "Дисциплина " + (Number(plan.duration) || 0).toFixed(0) + "с",
+            startTime: 0, duration: Number(plan.duration) || 20, noFlashAfter: true
+        };
+        state.regions = [...(state.regions || []), r];
+        state.selectedRegionId = r.id;
+        state.selectedClipId = null;
+        pausePlayback();
+        recalcTotalDuration();
+        renderTimeline();
+        if (typeof renderCutsTree === "function") renderCutsTree();
+        renderRegionsLane();
+        renderRegionsList();
+        updateRegionToolbarUI();
+        if (typeof updateClipperUI === "function") updateClipperUI();
+        seekTo(0);
+        saveProject();
+        showToast(`Дисциплина: клипов ${placed}, эффектов ${fxAdded}`, "ok");
+        return placed;
     };
 
     document.addEventListener("studio:template-plan", (e) => {

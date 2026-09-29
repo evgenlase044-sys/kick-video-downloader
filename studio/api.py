@@ -60,6 +60,32 @@ class ChatStopRequest(BaseModel):
     id: str
 
 
+DEFAULT_DISCIPLINE_MUSIC_SRC = r"C:\Users\artba\Downloads\YTDown.com_YouTube_Media_ObIsBktleQs_LEAN-ON-HARDTEKK_001_1080p.mp4"
+
+
+class DisciplineMusicRequest(BaseModel):
+    source_path: str = DEFAULT_DISCIPLINE_MUSIC_SRC
+
+
+class DisciplineAnalyzeRequest(BaseModel):
+    music_file: str = "discipline_music.m4a"
+
+
+class DisciplineStillsRequest(BaseModel):
+    filename: str
+    n: int = Field(6, ge=1, le=20)
+
+
+class DisciplinePlanRequest(BaseModel):
+    materials: List[str] = Field(default_factory=list)  # filenames in downloads/
+    music_file: str = "discipline_music.m4a"
+    music_offset: float = 0.0
+    target_dur: float = Field(21.0, ge=8.0, le=60.0)
+    n_pics: int = Field(4, ge=0, le=12)
+    hook_text: str = "ДИСЦИПЛИНА"
+    push_peak: float = Field(0.08, ge=0.02, le=0.25)
+
+
 def probe_duration(path: str) -> float:
     try:
         r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path],
@@ -161,5 +187,77 @@ def build_router(downloads_dir: str) -> APIRouter:
     def chat_status():
         import chat_recorder as CR
         return {"recordings": CR.recordings_status()}
+
+    # ── discipline edits (viral motivational) ──────────────────────────
+    @r.post("/api/studio/discipline/music")
+    def discipline_music(req: DisciplineMusicRequest):
+        from studio import discipline as D
+        from studio.security import check_import_path
+        try:
+            src = check_import_path(req.source_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not os.path.isfile(src):
+            raise HTTPException(status_code=404, detail="Музыкальный файл не найден")
+        try:
+            name = D.ensure_music_track(src, downloads_dir)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        try:
+            analysis = D.get_music_analysis(downloads_dir, name)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        return {"music_file": name, "analysis": analysis,
+                "default_source": DEFAULT_DISCIPLINE_MUSIC_SRC}
+
+    @r.post("/api/studio/discipline/analyze")
+    def discipline_analyze(req: DisciplineAnalyzeRequest):
+        from studio import discipline as D
+        path = _resolve(req.music_file)
+        try:
+            return {"music_file": os.path.basename(path),
+                    "analysis": D.get_music_analysis(downloads_dir, req.music_file)}
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    @r.post("/api/studio/discipline/stills")
+    def discipline_stills(req: DisciplineStillsRequest):
+        from studio import discipline as D
+        path = _resolve(req.filename)
+        # loops live in downloads/ root (visible to library/stream/export)
+        try:
+            stills = D.extract_stills(path, downloads_dir, n=req.n)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Кадры не извлечены: {exc}")
+        loops = []
+        for s in stills:
+            mp4 = os.path.splitext(s["png"])[0] + ".mp4"
+            if D.still_to_loop(s["png"], mp4):
+                loops.append(os.path.basename(mp4))
+        return {"stills": [os.path.basename(s["png"]) for s in stills], "loops": loops}
+
+    @r.post("/api/studio/discipline/plan")
+    def discipline_plan(req: DisciplinePlanRequest):
+        from studio import discipline as D
+        if not req.materials:
+            raise HTTPException(status_code=400, detail="Добавьте хотя бы одно видео")
+        mats = []
+        for name in req.materials:
+            p = _resolve(name)
+            mats.append({"filename": os.path.basename(p), "duration": D.probe_duration(p)})
+        music_path = _resolve(req.music_file)
+        analysis = D.get_music_analysis(downloads_dir, req.music_file)
+        # collect pic loops already materialized (discipline_still_*.mp4)
+        loops: List[str] = []
+        if req.n_pics > 0:
+            cands = sorted(f for f in os.listdir(downloads_dir)
+                           if f.startswith("discipline_still_") and f.endswith(".mp4"))
+            loops = cands[:req.n_pics]
+        plan = D.plan_discipline(materials=mats, music_file=music_path,
+                                 music_offset=req.music_offset,
+                                 target_dur=req.target_dur, n_pics=req.n_pics,
+                                 hook_text=req.hook_text, pic_loops=loops,
+                                 push_peak=req.push_peak, analysis=analysis)
+        return plan
 
     return r

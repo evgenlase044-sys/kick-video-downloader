@@ -2320,6 +2320,29 @@ def _apply_fx_chain(filter_parts: List[str], curr_v: str, fx_list: List[FxOverla
             _zb0, _zb1 = _studio.zoom_blur_window(s0, e0)
             _mb, curr_v = _studio.motion_blur_parts(curr_v, f"{tag_prefix}v{fi}z", _zb0, _zb1)
             filter_parts.extend(_mb)
+        elif fx.kind == "push":
+            # discipline: slow linear push-in 1 -> 1+a over the whole window
+            # (Ken Burns for lifestyle clips / still cards), same anchored
+            # scale+overlay machinery as zoom but a linear ramp envelope.
+            a = max(0.02, min(0.5, float(fx.peak if fx.peak else 0.08)))
+            ax = getattr(fx, "anchor_x", None)
+            ay = getattr(fx, "anchor_y", None)
+            ax = 0.5 if ax is None else max(0.0, min(1.0, float(ax)))
+            ay = 0.5 if ay is None else max(0.0, min(1.0, float(ay)))
+            prg = f"min(1\\,max(0\\,(t-{s0:.3f})/{max(1e-3, d):.3f}))"
+            zx = f"(1+{a:.4f}*{prg}*between(t\\,{s0:.3f}\\,{e0:.3f}))"
+            ox = f"-max(0\\,min({out_w}*{zx}-{out_w}\\,{ax:.4f}*{out_w}*{zx}-{ax:.4f}*{out_w}))"
+            oy = f"-max(0\\,min({out_h}*{zx}-{out_h}\\,{ay:.4f}*{out_h}*{zx}-{ay:.4f}*{out_h}))"
+            filter_parts.append(
+                f"{curr_v}scale={out_w}:{out_h}:flags=lanczos+accurate_rnd,"
+                f"split=2[{tag_prefix}v{fi}b][{tag_prefix}v{fi}s]")
+            filter_parts.append(
+                f"[{tag_prefix}v{fi}s]scale=w='2*trunc(iw*{zx}/2+0.5)':h='2*trunc(ih*{zx}/2+0.5)':"
+                f"eval=frame:flags=lanczos+accurate_rnd[{tag_prefix}v{fi}z]")
+            filter_parts.append(
+                f"[{tag_prefix}v{fi}b][{tag_prefix}v{fi}z]overlay=x='{ox}':y='{oy}':eval=frame,"
+                f"setsar=1[{tag_prefix}v{fi}]")
+            curr_v = f"[{tag_prefix}v{fi}]"
         elif fx.kind == "lens":
             # studio:lens-v2 (supersedes studio:lens-anim) - lens.js kernel,
             # auto-overscan, YUV chroma shift; enable-gated steps. See studio/fx_extra.py
@@ -2564,7 +2587,12 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
     top_h = int(round(out_h * 0.45 / 2) * 2)
     bot_h = out_h - top_h
 
-    total_dur = max(0.5, float(base.duration or 0.0) or max((L.duration for L in layers), default=1.0))
+    # composition length = base duration for single-clip packs, but the full
+    # out_start+duration span for sequential multi-clip timelines
+    # (discipline edits); otherwise everything past the first clip is cut.
+    span = max([(float(L.out_start or 0.0) + float(L.duration or 0.0)) for L in layers],
+               default=0.0)
+    total_dur = max(0.5, float(base.duration or 0.0) or 0.0, span)
     total_dur = max(0.5, min(total_dur, 600.0))
 
     inputs: List[str] = []
@@ -2602,7 +2630,14 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
     comp = None
     for li, L in enumerate(layers):
         is_base = li == 0
-        inputs.extend(["-ss", f"{max(0.0, L.src_offset):.3f}", "-t", f"{max(0.2, L.duration or total_dur):.3f}", "-i", L.source_file])
+        if is_base and total_dur > float(L.duration or 0.0) + 0.05:
+            # sequential multi-clip timeline: the base input must not EOF
+            # before total_dur (an EOF upstream of the overlay chain stalls
+            # the graph forever under -t); loop it, later covers hide it.
+            inputs.extend(["-stream_loop", "-1", "-ss", f"{max(0.0, L.src_offset):.3f}",
+                           "-t", f"{total_dur:.3f}", "-i", L.source_file])
+        else:
+            inputs.extend(["-ss", f"{max(0.0, L.src_offset):.3f}", "-t", f"{max(0.2, L.duration or total_dur):.3f}", "-i", L.source_file])
         src_i = n_inputs
         n_inputs += 1
         op = max(0.05, min(1.0, float(L.opacity if L.opacity is not None else 1.0)))
@@ -2759,8 +2794,13 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
             dl = f",adelay={delay_ms}|{delay_ms}" if delay_ms > 0 else ""
             audio_parts.append(f"[{src_i}:a]aresample=48000,aformat=channel_layouts=stereo,volume={gain}{dl}[la{li}]")
             layer_audio.append(f"[la{li}]")
-        # FX that live on this z level (below text) burn onto the composite
-        fx_here = [fx for fx in fx_normal if (fx.z or 0) == (L.z or 0)]
+        # FX that live on this z level (below text) burn onto the composite.
+        # Once per z level only (after its topmost layer): re-applying at
+        # every same-z layer redefines all filter labels (8 layers x N fx =
+        # hundreds of dup pads, which stalls the scheduler) and would bury
+        # the fx under later same-z covers.
+        _is_last_of_z = all((o.z or 0) != (L.z or 0) for o in layers[li + 1:])
+        fx_here = [fx for fx in fx_normal if (fx.z or 0) == (L.z or 0)] if _is_last_of_z else []
         if fx_here:
             comp = _apply_fx_chain(filter_parts, comp, fx_here, out_w, out_h, total_dur, f"z{L.z}_")
     # FX on levels with no active layer still apply at their depth
@@ -2976,12 +3016,23 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
         audio_map = "[aout]"
 
     filter_complex_str = ";".join(filter_parts)
+    # Windows CreateProcess limit (~32k per command line): long multi-layer
+    # graphs (discipline edits: 60k+) go through -filter_complex_script.
+    fc_script_path = None
+    graph_arg = ["-filter_complex", filter_complex_str]
+    if len(filter_complex_str) > 7000:
+        fc_script_path = os.path.join(DOWNLOADS_DIR, f"temp_graph_{idx}_{timestamp_str}.fcscript")
+        try:
+            with open(fc_script_path, "w", encoding="utf-8") as fh:
+                fh.write(filter_complex_str)
+            graph_arg = ["-filter_complex_script", fc_script_path]
+        except Exception:
+            fc_script_path = None
     # Метаданные как у профессионального экспорта (Adobe Media Encoder / Premiere):
     # -map_metadata -1 убирает служебные теги, bitexact подавляет Lavf/Lavc-подписи,
     # creation_time пишется как в AME. Итог: чистый isom без следов ffmpeg.
     ame_time = time.strftime("%Y-%m-%dT%H:%M:%S.000000Z", time.gmtime())
-    ffmpeg_cmd = ["ffmpeg", "-y"] + inputs + [
-        "-filter_complex", filter_complex_str,
+    ffmpeg_cmd = ["ffmpeg", "-y"] + inputs + graph_arg + [
         "-map", comp,
         "-map", audio_map,
         "-t", f"{total_dur:.3f}",
@@ -3030,7 +3081,8 @@ def _export_layered_clip(clip, out_path: str, out_filename: str, timestamp_str: 
     except Exception as e:
         print(f"[layered] Error rendering clip {clip.id}: {e}")
     finally:
-        for p in (locals().get("ass_path"), locals().get("text_ass_path")):
+        for p in (locals().get("ass_path"), locals().get("text_ass_path"),
+                  locals().get("fc_script_path")):
             if p and os.path.exists(p):
                 try:
                     os.remove(p)

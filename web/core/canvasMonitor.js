@@ -301,6 +301,15 @@
                     const fa = this.hooks.faceAnchor(base, t);
                     if (fa) anchor = fa;
                 }
+            } else if (f.kind === "push") {
+                // discipline: slow linear push-in 1 -> 1+amp (same as export)
+                const a0 = fxIn(f), a1 = fxOut(f);
+                const dur = Math.max(0.05, a1 - a0);
+                const p = Math.max(0, Math.min(1, (t - a0) / dur));
+                const A = (f.amp != null ? f.amp : (f.peak != null ? f.peak : 0.08));
+                const z = (t >= a0 - 0.05 && t <= a1 + 0.05) ? (1 + A * p) : 1;
+                if (z > scale) scale = z;
+                if (f.anchor) anchor = f.anchor;
             } else if (f.kind === "lens") {
                 // studio:preview-lens-barrel - use the SAME lensPunch as export
                 // (k1 barrel + overscan). Canvas 2D can't do per-pixel lens,

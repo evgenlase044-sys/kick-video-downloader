@@ -92,6 +92,13 @@
                         <span>Shorts</span>
                     </button>
 
+                    <button class="dock-tab" data-tab="discipline" id="tabBtnDiscipline" title="Вирусные мотивационные эдиты">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                        </svg>
+                        <span>Дисциплина</span>
+                    </button>
+
                     <button class="dock-tab" data-tab="inspector" id="tabBtnInspector">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="3"></circle>
@@ -533,6 +540,78 @@
                                 <span class="btn-text">Экспортировать пак</span>
                                 <span class="spinner" id="exportPackSpinner"></span>
                             </button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Tab: DISCIPLINE EDITS (viral motivational) -->
+                <div class="dock-panel-content" id="tabContentDiscipline">
+                    <div class="clipper-panel-scroll">
+                        <div class="sh-card">
+                            <header class="sh-head">
+                                <span class="sh-num">1</span>
+                                <div class="sh-title"><h4>Материалы</h4><p>перетащи видео сюда или импортируй</p></div>
+                            </header>
+                            <div class="disc-drop" id="discDropZone" title="Перетащи файлы или карточки из Ресурсов">
+                                <span>Перетащи видео сюда<br><small>или выбери из библиотеки ниже</small></span>
+                            </div>
+                            <div class="template-save-row">
+                                <input type="text" id="discPathInput" class="clipper-handle-input sh-input" placeholder="C:\путь\к\файлу.mp4" title="Абсолютный путь к файлу для импорта" />
+                                <button class="btn-sm btn-secondary" id="discImportBtn">Импорт</button>
+                            </div>
+                            <div class="template-list" id="discMaterialsList"></div>
+                        </div>
+
+                        <div class="sh-card">
+                            <header class="sh-head">
+                                <span class="sh-num">2</span>
+                                <div class="sh-title"><h4>Музыка</h4><p>один трек на все эдиты</p></div>
+                            </header>
+                            <input type="text" id="discMusicSrc" class="clipper-handle-input sh-input" title="Исходник трека" />
+                            <div class="template-save-row" style="margin-top:6px">
+                                <button class="btn-sm btn-accent" id="discMusicBtn">Импорт трека</button>
+                                <span class="library-hint" id="discMusicStatus">трек не импортирован</span>
+                            </div>
+                        </div>
+
+                        <div class="sh-card">
+                            <header class="sh-head">
+                                <span class="sh-num">3</span>
+                                <div class="sh-title"><h4>Кадры-картинки</h4><p>резкие кадры из материалов + зумы</p></div>
+                            </header>
+                            <button class="btn-sm btn-secondary" id="discStillsBtn">Извлечь кадры из материалов</button>
+                            <span class="library-hint" id="discStillsStatus"></span>
+                        </div>
+
+                        <div class="sh-card">
+                            <header class="sh-head">
+                                <span class="sh-num">4</span>
+                                <div class="sh-title"><h4>Сборка</h4><p>проект появится на слоях</p></div>
+                            </header>
+                            <div class="sub-set-row">
+                                <label>Длина, с</label>
+                                <select id="discDurSelect" class="kick-select">
+                                    <option value="15">15</option>
+                                    <option value="21" selected>21</option>
+                                    <option value="30">30</option>
+                                    <option value="45">45</option>
+                                </select>
+                            </div>
+                            <div class="sub-set-row">
+                                <label>Картинок</label>
+                                <select id="discPicsSelect" class="kick-select">
+                                    <option value="2">2</option>
+                                    <option value="4" selected>4</option>
+                                    <option value="6">6</option>
+                                    <option value="8">8</option>
+                                </select>
+                            </div>
+                            <div class="template-save-row">
+                                <input type="text" id="discHookInput" class="clipper-handle-input sh-input" value="ДИСЦИПЛИНА" title="Финальная плашка" />
+                            </div>
+                            <button class="primary-btn glow-btn btn-full" id="discBuildBtn" style="margin-top:8px">
+                                <span class="btn-text">Собрать эдит на слоях</span>
+                            </button>
+                            <p class="sh-hint" id="discStatus">Выбери материалы, импортируй трек — и жми сборку. Дальше: правки на таймлайне → «Экспортировать пак».</p>
                         </div>
                     </div>
                 </div>
@@ -1362,6 +1441,7 @@
     <script src="app.js?v=12"></script>
 <script src="studio/moments.js"></script><!-- studio:moments-panel -->
 <script src="studio/overlay_export.js"></script><!-- studio:overlay-export -->
+<script src="studio/discipline.js"></script>
 </body>
 </html>
 
