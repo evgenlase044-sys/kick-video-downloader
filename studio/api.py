@@ -20,11 +20,29 @@ class MomentsRequest(BaseModel):
     filename: str
     top_k: int = Field(10, ge=1, le=50)
     clip_len: float = Field(28.0, ge=5.0, le=180.0)
+    clip_lens: Optional[List[float]] = None  # §6 P2: dual-export e.g. [25, 50] -> grouped moments
     use_llm: bool = False
     chat_file: Optional[str] = None          # JSON / JSONL inside downloads/
     chat: Optional[List[Dict[str, Any]]] = None
     words: Optional[List[Dict[str, Any]]] = None
+    motion: Optional[List[float]] = None     # §6 v2 visual signals (per-window)
+    face: Optional[List[float]] = None
+    scene_cuts: Optional[List[float]] = None
     weights: Optional[Dict[str, float]] = None
+    feedback: Optional[Dict[str, Any]] = None  # {channel, kept: [ids]}
+
+
+class PlatformPolicyRequest(BaseModel):
+    platform: str = "youtube"                # youtube | tiktok | kick
+    duration: Optional[float] = None
+    has_music: bool = False
+    reused: bool = False
+
+
+class MomentsFeedbackRequest(BaseModel):
+    channel: Optional[str] = None
+    kept: List[int] = Field(default_factory=list)
+    total: int = 0
 
 
 class PlanRequest(BaseModel):
@@ -76,15 +94,27 @@ def build_router(downloads_dir: str) -> APIRouter:
         def work():
             dur = probe_duration(path)
             rms = M.audio_rms_series(path)
+            if req.clip_lens and len(req.clip_lens) >= 2:
+                grouped = {}
+                for cl in req.clip_lens:
+                    grouped[str(cl)] = M.find_moments(duration=dur, rms_db=rms, chat=chat, words=req.words or [],
+                                                      motion=req.motion, face=req.face, scene_cuts=req.scene_cuts,
+                                                      top_k=req.top_k, clip_len=float(cl), use_llm=req.use_llm,
+                                                      weights=req.weights)
+                return dur, grouped
             return dur, M.find_moments(duration=dur, rms_db=rms, chat=chat, words=req.words or [],
+                                       motion=req.motion, face=req.face, scene_cuts=req.scene_cuts,
                                        top_k=req.top_k, clip_len=req.clip_len, use_llm=req.use_llm,
                                        weights=req.weights)
         try:
             dur, found = await asyncio.to_thread(work)
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc))
+        if isinstance(found, dict):
+            return {"filename": os.path.basename(path), "duration": dur, "moments_by_len": found,
+                    "signals": {"audio": True, "chat": bool(chat), "speech": bool(req.words), "llm": req.use_llm, "visual": bool(req.motion or req.face)}}
         return {"filename": os.path.basename(path), "duration": dur, "moments": found,
-                "signals": {"audio": True, "chat": bool(chat), "speech": bool(req.words), "llm": req.use_llm}}
+                "signals": {"audio": True, "chat": bool(chat), "speech": bool(req.words), "llm": req.use_llm, "visual": bool(req.motion or req.face)}}
 
     @r.get("/api/studio/templates")
     def templates():
@@ -115,6 +145,17 @@ def build_router(downloads_dir: str) -> APIRouter:
         if st is None:
             raise HTTPException(status_code=404, detail="Запись чата не найдена")
         return {"id": req.id, "status": st}
+
+    @r.post("/api/studio/moments/feedback")
+    def moments_feedback(req: MomentsFeedbackRequest):
+        M._Learner.nudge(req.channel or "", req.kept, req.total)
+        return {"ok": True}
+
+    @r.post("/api/platform/policy")
+    def platform_policy(req: PlatformPolicyRequest):
+        from studio import platform_policy as PP
+        res = PP.check(req.platform, duration=req.duration, has_music=req.has_music, reused=req.reused)
+        return res
 
     @r.get("/api/studio/chat/status")
     def chat_status():

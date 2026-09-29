@@ -1,0 +1,106 @@
+[
+  {
+    "file": "fixture_kick_1080p60_short.mp4",
+    "sha256": "889044b02b511515",
+    "bytes": 1360425,
+    "probe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "r_frame_rate": "60/1"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "r_frame_rate": "0/0"
+        }
+      ],
+      "format": {
+        "duration": "5.045000"
+      }
+    }
+  },
+  {
+    "file": "fixture_kick_full_1080x1080.mp4",
+    "sha256": "4315b081c2707918",
+    "bytes": 1030520,
+    "probe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1080,
+          "height": 1080,
+          "r_frame_rate": "30/1"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "r_frame_rate": "0/0"
+        }
+      ],
+      "format": {
+        "duration": "4.066016"
+      }
+    }
+  },
+  {
+    "file": "fixture_kick_split_1080x1920.mp4",
+    "sha256": "93de5f40d7a2cf3c",
+    "bytes": 4420528,
+    "probe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1080,
+          "height": 1920,
+          "r_frame_rate": "60/1"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "r_frame_rate": "0/0"
+        }
+      ],
+      "format": {
+        "duration": "4.033008"
+      }
+    }
+  },
+  {
+    "file": "fixture_phone_1080p.mp4",
+    "sha256": "ce11a7c192a8613f",
+    "bytes": 1227343,
+    "probe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 960,
+          "height": 1706,
+          "r_frame_rate": "99/4"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "r_frame_rate": "0/0"
+        }
+      ],
+      "format": {
+        "duration": "5.050505"
+      }
+    }
+  }
+]

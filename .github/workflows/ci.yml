@@ -15,8 +15,9 @@ jobs:
         with: { python-version: "3.12" }
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg xvfb
       - run: pip install -r requirements.txt
+      - run: npm ci || npm install
       - run: bash tools/ci_check.sh | tee ci_report.md
       - uses: actions/upload-artifact@v4
         if: always()

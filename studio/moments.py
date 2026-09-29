@@ -295,13 +295,73 @@ def llm_rank(moments: List[Moment], api_key: Optional[str] = None, model: Option
     return out
 
 
+VISUAL_WEIGHT = "visual"
+VISION_DEFAULTS = {"motion": 0.18, "face": 0.12, "scene_cut": 0.10}
+
+
+def visual_signal(motion: Optional[Sequence[float]] = None, face: Optional[Sequence[float]] = None,
+                  scene_cuts: Optional[Sequence[float]] = None, n_windows: int = 0) -> List[float]:
+    """Lightweight visual proxy (PR §6 v2): motion energy / face presence / scene cuts.
+    All three are per-window 0..1-ish; caller may pass any subset. Empty -> []."""
+    if n_windows <= 0:
+        return []
+    parts = []
+    for arr in (motion, face, scene_cuts):
+        if arr and len(arr) == n_windows:
+            zs = zscore(list(arr))
+            parts.append([squash(z) for z in zs])
+    if not parts:
+        return []
+    # average available visual cues equally
+    return [sum(col) / len(col) for col in zip(*parts)]
+
+
+def compute_motion_proxy_from_rms(rms_db: Sequence[float]) -> List[float]:
+    """Heuristic motion proxy from audio dynamics (no CV needed on CI).
+    Loudness deltas correlate with camera/scene energy for v2 warm-start."""
+    if not rms_db:
+        return []
+    n = max(1, int(max(0.0, 60 * 2 - 10) // 2) + 1)
+    n = max(1, len(rms_db) // 4)
+    deltas = [abs(rms_db[i] - rms_db[i - 1]) for i in range(1, len(rms_db))]
+    # downsample deltas to window grid via window_mean
+    win = window_mean(deltas, HOP_S, WINDOW_S, STEP_S)
+    return win
+
+
+def find_moments_v2(*, duration: float, rms_db: Optional[Sequence[float]] = None,
+                    chat: Optional[Sequence[dict]] = None, words: Optional[Sequence[dict]] = None,
+                    motion: Optional[Sequence[float]] = None, face: Optional[Sequence[float]] = None,
+                    scene_cuts: Optional[Sequence[float]] = None,
+                    top_k: int = 10, clip_len: float = 28.0, use_llm: bool = False,
+                    weights: Optional[Dict[str, float]] = None, llm=None) -> List[dict]:
+    """v2: adds visual signal (motion/face/cut) to the v1 blend. Back-compat with v1 weights."""
+    vis = visual_signal(motion, face, scene_cuts,
+                        n_windows=max(1, int(max(0.0, duration - WINDOW_S) // STEP_S) + 1) if not rms_db else len(audio_signal(rms_db or [])) or 1)
+    return find_moments(duration=duration, rms_db=rms_db, chat=chat, words=words,
+                        top_k=top_k, clip_len=clip_len, use_llm=use_llm,
+                        weights=weights, llm=llm, _visual=vis)
+
+
 def find_moments(*, duration: float, rms_db: Optional[Sequence[float]] = None,
                  chat: Optional[Sequence[dict]] = None, words: Optional[Sequence[dict]] = None,
+                 motion: Optional[Sequence[float]] = None, face: Optional[Sequence[float]] = None,
+                 scene_cuts: Optional[Sequence[float]] = None,
                  top_k: int = 10, clip_len: float = 28.0, use_llm: bool = False,
-                 weights: Optional[Dict[str, float]] = None, llm=None) -> List[dict]:
+                 weights: Optional[Dict[str, float]] = None, llm=None, _visual: Optional[Sequence[float]] = None) -> List[dict]:
     a = audio_signal(rms_db or [])
     n = len(a) if a else max(1, int(max(0.0, duration - WINDOW_S) // STEP_S) + 1)
-    signals = {"audio": a, "chat": chat_signal(chat or [], n), "speech": speech_signal(words or [], n)}
+    # visual: explicit _visual wins, else build from motion/face/cuts
+    if _visual is None and (motion is not None or face is not None or scene_cuts is not None):
+        _visual = visual_signal(motion, face, scene_cuts, n_windows=n)
+    signals: Dict[str, List[float]] = {"audio": a, "chat": chat_signal(chat or [], n), "speech": speech_signal(words or [], n)}
+    if _visual is not None and len(_visual) == n:
+        signals["visual"] = list(_visual)
+    elif _visual is None and (not chat and not words):
+        # warm-start: audio deltas as visual proxy so v2 has signal on plain VODs
+        proxy = compute_motion_proxy_from_rms(rms_db or [])
+        if len(proxy) == n:
+            signals["visual_proxy"] = proxy
     scores = combine(signals, weights)
     moments = pick_moments(scores, signals, duration, top_k=max(top_k * 3 if use_llm else top_k, top_k),
                            clip_len=clip_len)
@@ -327,6 +387,37 @@ def find_moments(*, duration: float, rms_db: Optional[Sequence[float]] = None,
                 m.reason = str(r.get("reason", ""))[:200]
             moments.sort(key=lambda m: m.score, reverse=True)
     return [m.as_dict() for m in moments[:top_k]]
+
+
+class _Learner:
+    """Tiny online learner (§6 v2): per-channel weight nudges from kept/discarded clips."""
+    PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads", ".moments_weights.json")
+    DEFAULTS = {"chat": 0.30, "audio": 0.30, "speech": 0.15, "visual": 0.10, "visual_proxy": 0.10, "llm": 0.25}
+
+    @classmethod
+    def load(cls) -> Dict[str, float]:
+        try:
+            with open(cls.PATH, "r", encoding="utf-8") as fh:
+                d = json.load(fh)
+                return {k: float(v) for k, v in d.items() if isinstance(v, (int, float))}
+        except Exception:
+            return dict(cls.DEFAULTS)
+
+    @classmethod
+    def save(cls, weights: Dict[str, float]):
+        try:
+            os.makedirs(os.path.dirname(cls.PATH), exist_ok=True)
+            tmp = cls.PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(weights, fh, ensure_ascii=False)
+            os.replace(tmp, cls.PATH)
+        except Exception:
+            pass
+
+    @classmethod
+    def nudge(cls, channel: str, kept_ids: List[int], total: int):
+        # placeholder: no per-channel persistence yet; emit a log hook for future training
+        return
 
 
 def load_chat_file(path: str) -> List[dict]:

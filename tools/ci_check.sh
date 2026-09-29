@@ -20,6 +20,12 @@ run "studio API exposes chat recording (PR #10)" python -c "import studio.api as
 run "web core selftest" node web/core/selftest.js
 run "web audit selftest" node web/core/selftest_audit.js
 run "overlay export selftest" node web/studio/selftest_overlay.js
+if command -v xvfb-run >/dev/null 2>&1; then
+  run "GPU equivalence (WebGL2 vs JS — JFA/Kawase/Lens)" xvfb-run -a npx electron tools/gl_equiv_test.js
+else
+  echo "### ⏭️ GPU equivalence skipped (xvfb-run not available locally)"
+  echo '```'; echo "install xvfb on CI: sudo apt-get install -y xvfb"; echo '```'; echo
+fi
 for f in web/editor.js web/app.js web/studio/moments.js web/studio/overlay_export.js web/core/canvasMonitor.js web/core/text/canvasText.js web/core/render/glPasses.js; do
   [ -f "$f" ] && run "node --check $f" node --check "$f"
 done

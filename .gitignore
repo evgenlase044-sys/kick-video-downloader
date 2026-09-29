@@ -43,10 +43,10 @@ save_cookies.py
 *.lib
 *.dylib
 
-# Video downloads & large media chunks
+# Video downloads & large media chunks (fixtures are whitelisted below)
 downloads/
 *.ts
-*.mp4
+!tests/fixtures/*.mp4
 *.mkv
 *.avi
 *.mov

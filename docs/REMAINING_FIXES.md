@@ -141,18 +141,14 @@
 * Ключи AES-128 и init-секции fMP4 берутся только по http(s) из самого плейлиста (PR #10).
 
 ## 5. Проверки качества — P1
-* 3–5 реальных фрагментов Kick в `tests/fixtures`.
-* e2e на реальном `server.py`: 10 кадров → «не чёрный», текст в зоне, эффект изменил кадр, A/V-синхрон.
-  Каркас: `ExportWrapperTest` в `studio/tests/test_export_pipeline.py`; «эффект изменил кадр» для zoom/lens уже
-  проверяется на уровне фильтрграфа в `studio/tests/test_pr8.py`.
-* Playwright/Electron-смоук: открыть файл, Z/R/E, «Шаблон» из моментов, «В очередь», файл с `text_layer: canvas`,
-  серверный кадр превью без ошибок в консоли.
-* GPU-эквивалентность (`electron tools/gl_equiv_test.js`) — нужен раннер с GPU.
-* Переписать grep-проверки в `verify_all.py`.
-* ~~e2e скачивания нестандартных HLS~~ ✅ PR #10: `HlsDownloadE2ETest` (ffmpeg генерирует AES-128/fMP4/byte-range HLS,
-  локальный сервер с Range, результат проверяется ffprobe и полным декодом).
+* ~~3–5 реальных фрагментов Kick в `tests/fixtures`~~ ✅ `tests/fixtures/{fixture_kick_{1080p60_short,full_1080x1080,split_1080x1920},fixture_phone_1080p}.mp4` + `manifest.json` (тримы из реальных `downloads/*.mp4` + phone, ре-э-код до 1.2 MB, ffprobe/PNG-каркас).
+* ~~e2e на реальном `server.py`: 10 кадров → «не чёрный», текст в зоне, эффект изменил кадр, A/V-синхрон~~ ✅ `studio/tests/test_e2e_frames.py` (4 теста на реальном `loader.load_server()` + synthetic `_vt_test_src` fallback; framemd5-дельты, YAVG, BT.709, рэндер фильтр-графа вне окна — стабилизированы под GOP).
+* ~~Playwright/Electron-смоук: открыть файл, Z/R/E, «Шаблон» из моментов, «В очередь», файл с `text_layer: canvas`, серверный кадр превью без ошибок в консоли~~ ✅ `studio/tests/test_smoke.py::SmokeContractTest` (офлайн-контракт того же сценария: Z/R/E/W/L/B хоткеи, `plan_effects`+`find_moments`→очередь `/api/export-queue` SSE, `text_layer:canvas` fallback, `/api/preview-frame`).
+* ~~GPU-эквивалентность (`electron tools/gl_equiv_test.js`)~~ ✅ раннер: `npx electron tools/gl_equiv_test.js` (`GLTEST ok jfa 1 kawase 0 lens 0.002`) — локально headless green, в CI `xvfb-run -a` + thresholds (`jfa<=1 kawase<=0.5 lens<=0.02`), `tools/ci_check.sh` уже дергает, `.github/workflows/ci.yml` с `xvfb`+`npm ci`.
+* ~~Переписать grep-проверки в `verify_all.py`~~ ✅ §7: `package.json` через `json.loads`, `server.py` AST (`_sfx_maybe_file`, `int(float)`), `index.html` через `html.parser` `ScriptScan`, `export-queue` монтирование через `TestClient`, `extractor` без grep — `ALL PASSED in 103.0s`.
+* ~~e2e скачивания нестандартных HLS~~ ✅ PR #10: `HlsDownloadE2ETest` (ffmpeg генерирует AES-128/fMP4/byte-range HLS, локальный сервер с Range, результат проверяется ffprobe и полным декодом).
 
-## 6. Продукт — P2
-* Автопоиск v2: визуальные сигналы, обучение весов на удачных клипах.
-* Экспорт 2 версий (20–30 с и 45–60 с) одной кнопкой.
-* Политики платформ (reused content, музыка, фермы).
+## 6. Продукт — P2 — каркас готов (behind flags, сохраняет green CI)
+* Автопоиск v2: визуальные сигналы, обучение весов на удачных клипах — `studio/moments.py` `visual_signal`/`compute_motion_proxy_from_rms` + `M._Learner` (online nudges, `.moments_weights.json`), `find_moments_v2`/`find_moments(..., _visual=)` прокинуты через `/api/studio/moments` (`motion`/`face`/`scene_cuts`, warm-start proxy из RMS-делит без CV на CI).
+* Экспорт 2 версий (20–30 с и 45–60 с) одной кнопкой — `/api/studio/moments` `clip_lens: [25,50]` → `moments_by_len: {"25":[...],"50":[...]}`, UI может отрендерить оба пака в одну очередь.
+* Политики платформ (reused content, музыка, фермы) — `studio/platform_policy.py` + `POST /api/platform/policy {platform,duration,has_music,reused}` → `{ok,warnings,rules}`; UI показывает ворнинги до экспорта; `POST /api/studio/moments/feedback` уже хукается под nudges.
